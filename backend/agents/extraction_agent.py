@@ -1,28 +1,17 @@
 from __future__ import annotations
 
 import functools
+import json
 import logging
-from dataclasses import dataclass, asdict
+import re
 from typing import Any, Dict
 
 from backend.llm.client import chat_completion
+from backend.models import ExtractionResult
 
 
 logger = logging.getLogger(__name__)
 EXTRACTION_MODEL = "meta-llama/Llama-3.2-1B-Instruct"
-
-
-@dataclass
-class ExtractionResult:
-    translated_text: str
-    language: str
-    cpv_codes: list[str]
-    other_codes: list[str]
-    key_requirements_summary: str
-    raw_structured: Dict[str, Any]
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
 
 
 EXTRACTION_SYSTEM_PROMPT = """
@@ -33,23 +22,33 @@ You receive the raw text of a Request for Proposal (RFP) or tender document.
 Tasks:
 1. Detect the language of the document.
 2. If the document is not in English, translate it into clear, professional English.
-3. Extract all useful structured information that would help a bidder respond, including:
-   - CPV codes or similar classification codes (e.g., UNSPSC, CPV, NAICS, NUTS).
-   - Any tender identifiers or reference numbers.
-   - Deadlines and key dates.
-   - Contract duration and options for extension.
-   - Budget / estimated contract value, if mentioned.
-   - Mandatory requirements versus optional/desired requirements.
-   - Any explicit disqualifying conditions (e.g., late submission, missing documents).
-4. Provide a concise summary (10–15 bullet points) of the key solution and response requirements.
+3. Extract ONLY the information that is explicitly stated in the document. Do NOT invent, guess, or infer information that is not present.
+
+Extract the following information ONLY if it appears in the document text:
+   - CPV codes or similar classification codes: ONLY extract codes that are explicitly written in the document (e.g., "CPV 12345678" or "CPV code: 12345678"). If no CPV codes are mentioned, return an empty list.
+   - Other classification codes: ONLY extract codes that are explicitly written (e.g., UNSPSC, NAICS, NUTS codes). Include the code type and value exactly as written. If no codes are mentioned, return an empty list.
+   - Tender identifiers or reference numbers: ONLY if explicitly stated (e.g., "RFP No: 2024/01").
+   - Deadlines and key dates: ONLY if explicitly stated with dates.
+   - Contract duration and options for extension: ONLY if explicitly mentioned.
+   - Budget / estimated contract value: ONLY if explicitly stated with numbers.
+   - Mandatory requirements versus optional/desired requirements: Extract from explicit statements.
+   - Disqualifying conditions: ONLY if explicitly stated (e.g., "late submission will result in rejection").
+4. Provide a concise summary (10–15 bullet points) of the key solution and response requirements based ONLY on what is stated in the document.
+
+CRITICAL RULES:
+- Extract ONLY information that is explicitly written in the document text.
+- Do NOT invent, guess, or create codes that are not present.
+- If a field is not mentioned in the document, return an empty list or empty string.
+- For codes: Only include codes that are literally written in the document (e.g., "CPV 12345678" or "CPV code 12345678").
+- If you see "CPV" or "classification code" mentioned but no actual code numbers, do NOT create fake codes.
 
 Output JSON ONLY, with the following top-level keys:
 - language: ISO language name or code (e.g., "en", "fr").
 - translated_text: full document text in English.
-- cpv_codes: list of strings.
-- other_codes: list of strings with code type and value, e.g. "UNSPSC: 12345678".
+- cpv_codes: list of strings. ONLY include codes that are explicitly written in the document. If none found, return empty list [].
+- other_codes: list of strings with code type and value. ONLY include codes that are explicitly written. Format as "TYPE: VALUE" (e.g., "UNSPSC: 12345678"). If none found, return empty list [].
 - key_requirements_summary: markdown bullet list (as a single string).
-- metadata: object with any additional fields you consider useful (deadlines, contract value, identifiers, etc.).
+- metadata: object with any additional fields you consider useful (deadlines, contract value, identifiers, etc.). Only include fields that are explicitly mentioned in the document.
 
 Respond with STRICTLY valid JSON. Do not include explanations.
 """
@@ -57,13 +56,12 @@ Respond with STRICTLY valid JSON. Do not include explanations.
 
 @functools.lru_cache(maxsize=128)
 def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
-    """
-    Internal cached version of extraction agent.
-    Cache key is based on document_text.
-    """
     user_prompt = (
         "Here is the raw text of an RFP / tender document:\n\n"
-        f"```rfp_text\n{document_text}\n```"
+        f"```rfp_text\n{document_text}\n```\n\n"
+        "IMPORTANT: Extract ONLY information that is explicitly written in the document above. "
+        "Do NOT invent or create codes, numbers, or identifiers that are not present in the text. "
+        "If codes are not mentioned, return empty lists. Only extract what you can see written in the document."
     )
 
     logger.info("Extraction agent: processing (input_chars=%d)", len(document_text))
@@ -78,17 +76,7 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
         max_tokens=None,
     )
 
-    import json
-    import re
-
     def _parse_json_safely(raw: str) -> dict:
-        """
-        Robust JSON parser that handles common LLM output issues:
-        - Markdown code fences
-        - Trailing commas
-        - Control characters
-        - Truncated JSON
-        """
         cleaned = (
             raw.replace("```json", "")
             .replace("```", "")
@@ -107,10 +95,6 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
             return json.loads(cleaned)
         except json.JSONDecodeError as e:
             error_pos = getattr(e, 'pos', None)
-            if error_pos:
-                before = cleaned[:error_pos]
-                after = cleaned[error_pos:]
-                pass
             
             try:
                 partial = {}
@@ -122,19 +106,18 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
                     try:
                         cpv_str = '[' + cpv_match.group(1) + ']'
                         partial['cpv_codes'] = json.loads(cpv_str)
-                    except:
+                    except (json.JSONDecodeError, ValueError):
                         partial['cpv_codes'] = []
                 
                 if partial:
                     logger.warning(
                         "Partially parsed JSON, using extracted fields with defaults"
                     )
-                    # Do NOT set translated_text here; caller will fall back to OCR text.
                     return {
                         "language": partial.get("language", "en"),
                         "cpv_codes": partial.get("cpv_codes", []),
                     }
-            except:
+            except Exception:
                 pass
             
             logger.error("Failed to parse JSON after all cleanup attempts. Error at position %s", error_pos)
@@ -144,7 +127,6 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
     try:
         data = _parse_json_safely(content)
     except ValueError:
-        # If parsing fails completely, treat OCR text as translated_text and return empty structure.
         logger.warning(
             "Extraction agent: JSON parsing failed completely, using OCR text as translated_text."
         )
@@ -157,10 +139,8 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
             "metadata": {},
         }
 
-    translated_text = data.get("translated_text") or document_text
-
     result = ExtractionResult(
-        translated_text="",  # Don't include original text in extraction output
+        translated_text="",
         language=data.get("language", "en"),
         cpv_codes=data.get("cpv_codes", []) or [],
         other_codes=data.get("other_codes", []) or [],
@@ -177,10 +157,6 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
 
 
 def run_extraction_agent(document_text: str) -> ExtractionResult:
-    """
-    Runs the extraction agent on raw document text.
-    Results are cached using LRU cache based on document text.
-    """
     cache_info = _run_extraction_agent_cached.cache_info()
     logger.info(
         "Extraction agent: starting (input_chars=%d, cache_hits=%d, cache_misses=%d, cache_size=%d/%d)",
@@ -190,16 +166,15 @@ def run_extraction_agent(document_text: str) -> ExtractionResult:
         cache_info.currsize,
         cache_info.maxsize,
     )
-    
+
     result = _run_extraction_agent_cached(document_text)
-    
-    # Check if this was a cache hit
+
     new_cache_info = _run_extraction_agent_cached.cache_info()
     if new_cache_info.hits > cache_info.hits:
         logger.info("Extraction agent: cache HIT - returned cached result")
     else:
         logger.info("Extraction agent: cache MISS - processed new request")
-    
+
     return result
 
 

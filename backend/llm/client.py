@@ -5,13 +5,11 @@ from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from openai import OpenAI
 
-
 logger = logging.getLogger(__name__)
 
 HF_BASE_URL = "https://router.huggingface.co/v1"
 
 load_dotenv()
-
 
 def get_hf_client() -> OpenAI:
     api_key = os.environ.get("HF_TOKEN")
@@ -56,17 +54,6 @@ def chat_completion_with_vision(
     temperature: float = 0.2,
     max_tokens: Optional[int] = None,
 ) -> str:
-    """
-    Same as chat_completion but explicitly supports vision models with image inputs.
-    Messages can include image content in OpenAI vision format:
-    {
-        "role": "user",
-        "content": [
-            {"type": "text", "text": "What's in this image?"},
-            {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
-        ]
-    }
-    """
     logger.info("Calling vision LLM model=%s temperature=%s", model, temperature)
     client = get_hf_client()
     completion = client.chat.completions.create(
