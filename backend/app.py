@@ -19,7 +19,6 @@ from backend.agents.requirements_agent import run_requirements_agent
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
-# Simple backend logging: logs go to stdout/stderr and are visible in Docker logs
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 logger = logging.getLogger(__name__)
 
@@ -89,7 +88,6 @@ async def process_rfp(file: UploadFile = File(...)) -> Dict[str, Any]:
         logger.warning("REQUEST %s: no text extracted from file", request_id)
         raise HTTPException(status_code=400, detail="No text could be extracted from file.")
 
-    # Step 1: extraction agent (structured info only)
     try:
         extraction_res = run_extraction_agent(text)
     except Exception as exc:
@@ -113,7 +111,6 @@ async def process_rfp(file: UploadFile = File(...)) -> Dict[str, Any]:
         len(extraction_res.other_codes),
     )
 
-    # Step 2: scope agent (on plain OCR text only)
     try:
         scope_res = run_scope_agent(translated_text=text)
     except Exception as exc:
@@ -135,14 +132,12 @@ async def process_rfp(file: UploadFile = File(...)) -> Dict[str, Any]:
     )
     logger.info("REQUEST %s: extraction + scope completed in %.2fs", request_id, elapsed)
 
-    # Combine OCR text with extraction + scope outputs; requirements come later
     response: Dict[str, Any] = {
         "extraction": extraction_res.to_dict(),
         "scope": scope_res.to_dict(),
         "requirements": None,
         "ocr_source_text": text,
     }
-    # Also include OCR text under extraction for convenience
     response["extraction"]["ocr_text"] = text
     return response
 
@@ -153,10 +148,6 @@ class RequirementsRequest(BaseModel):
 
 @app.post("/run-requirements")
 async def run_requirements(req: RequirementsRequest) -> Dict[str, Any]:
-    """
-    Run the requirements agent on scoped text.
-    This is called only after the human has accepted the scope in the UI.
-    """
     logger.info(
         "Requirements endpoint called (essential_chars=%d)", len(req.essential_text)
     )

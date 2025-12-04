@@ -3,24 +3,15 @@ from __future__ import annotations
 import functools
 import json
 import logging
-from dataclasses import dataclass, asdict
-from typing import Any, Dict, List
+import re
+from typing import Any, Dict
 
 from backend.llm.client import chat_completion
+from backend.models import RequirementItem, RequirementsResult
 
 
 logger = logging.getLogger(__name__)
 REQUIREMENTS_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-
-
-@dataclass
-class RequirementsResult:
-    solution_requirements: List[Dict[str, Any]]
-    response_structure_requirements: List[Dict[str, Any]]
-    notes: str
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
 
 
 REQUIREMENTS_SYSTEM_PROMPT = """
@@ -65,13 +56,8 @@ Respond with STRICTLY valid JSON. Do not include explanations.
 
 @functools.lru_cache(maxsize=128)
 def _run_requirements_agent_cached(essential_text: str, structured_info_json: str) -> RequirementsResult:
-    """
-    Internal cached version of requirements agent.
-    Cache key is based on essential_text and structured_info (as JSON string).
-    """
-    # Parse structured_info back from JSON
     structured_info = json.loads(structured_info_json) if structured_info_json else {}
-    
+
     user_prompt = (
         "You are given the scoped RFP text (with unnecessary content removed) and merged structured info.\n\n"
         "=== SCOPED RFP TEXT ===\n"
@@ -99,8 +85,6 @@ def _run_requirements_agent_cached(essential_text: str, structured_info_json: st
         max_tokens=None,
     )
 
-    import re
-
     def _parse_json_safely(raw: str) -> dict:
         cleaned = (
             raw.replace("```json", "")
@@ -125,9 +109,24 @@ def _run_requirements_agent_cached(essential_text: str, structured_info_json: st
         logger.error("Requirements agent: JSON parsing failed: %s", e)
         raise
 
+    # Convert dict items to RequirementItem objects
+    solution_reqs = []
+    for req_dict in data.get("solution_requirements", []) or []:
+        try:
+            solution_reqs.append(RequirementItem(**req_dict))
+        except Exception as e:
+            logger.warning("Failed to parse solution requirement: %s, error: %s", req_dict, e)
+
+    response_reqs = []
+    for req_dict in data.get("response_structure_requirements", []) or []:
+        try:
+            response_reqs.append(RequirementItem(**req_dict))
+        except Exception as e:
+            logger.warning("Failed to parse response structure requirement: %s, error: %s", req_dict, e)
+
     result = RequirementsResult(
-        solution_requirements=data.get("solution_requirements", []) or [],
-        response_structure_requirements=data.get("response_structure_requirements", []) or [],
+        solution_requirements=solution_reqs,
+        response_structure_requirements=response_reqs,
         notes=data.get("notes", ""),
     )
     logger.info(
@@ -142,13 +141,7 @@ def run_requirements_agent(
     essential_text: str,
     structured_info: Dict[str, Any],
 ) -> RequirementsResult:
-    """
-    Runs the requirements agent on scoped text and structured info.
-    Results are cached using LRU cache based on essential_text and structured_info.
-    """
-    # Convert structured_info to JSON string for caching (dicts aren't hashable)
     structured_info_json = json.dumps(structured_info, sort_keys=True) if structured_info else "{}"
-    
     cache_info = _run_requirements_agent_cached.cache_info()
     logger.info(
         "Requirements agent: starting (essential_chars=%d, has_structured=%s, cache_hits=%d, cache_misses=%d, cache_size=%d/%d)",
@@ -159,16 +152,15 @@ def run_requirements_agent(
         cache_info.currsize,
         cache_info.maxsize,
     )
-    
+
     result = _run_requirements_agent_cached(essential_text, structured_info_json)
-    
-    # Check if this was a cache hit
+
     new_cache_info = _run_requirements_agent_cached.cache_info()
     if new_cache_info.hits > cache_info.hits:
         logger.info("Requirements agent: cache HIT - returned cached result")
     else:
         logger.info("Requirements agent: cache MISS - processed new request")
-    
+
     return result
 
 

@@ -1,31 +1,31 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, asdict
 from typing import Any, Dict, Optional
 
-from backend.agents.extraction_agent import run_extraction_agent, ExtractionResult
-from backend.agents.scope_agent import run_scope_agent, ScopeResult
-from backend.agents.requirements_agent import (
-    run_requirements_agent,
-    RequirementsResult,
-)
+from backend.agents.extraction_agent import run_extraction_agent
+from backend.agents.scope_agent import run_scope_agent
+from backend.agents.requirements_agent import run_requirements_agent
+from backend.models import ExtractionResult, RequirementsResult, ScopeResult
+from pydantic import BaseModel
 
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class RFPPipelineOutput:
+class RFPPipelineOutput(BaseModel):
+    """Output model for the complete RFP pipeline."""
+
     extraction: ExtractionResult
     scope: ScopeResult
-    requirements: RequirementsResult
+    requirements: Optional[RequirementsResult] = None
 
     def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
         return {
             "extraction": self.extraction.to_dict(),
             "scope": self.scope.to_dict(),
-            "requirements": self.requirements.to_dict(),
+            "requirements": self.requirements.to_dict() if self.requirements else None,
         }
 
 
