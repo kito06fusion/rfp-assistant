@@ -1,0 +1,13 @@
+services:
+  backend:
+    build: .
+    container_name: rfp-backend
+    ports:
+      - "8001:8001"
+    environment:
+      # Pass through your HF_TOKEN from the host environment
+      - HF_TOKEN=${HF_TOKEN}
+    working_dir: /app
+    command: uvicorn backend.app:app --host 0.0.0.0 --port 8001
+
+
