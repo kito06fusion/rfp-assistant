@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import functools
+import json
 import logging
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List
@@ -61,10 +63,15 @@ Respond with STRICTLY valid JSON. Do not include explanations.
 """
 
 
-def run_requirements_agent(
-    essential_text: str,
-    structured_info: Dict[str, Any],
-) -> RequirementsResult:
+@functools.lru_cache(maxsize=128)
+def _run_requirements_agent_cached(essential_text: str, structured_info_json: str) -> RequirementsResult:
+    """
+    Internal cached version of requirements agent.
+    Cache key is based on essential_text and structured_info (as JSON string).
+    """
+    # Parse structured_info back from JSON
+    structured_info = json.loads(structured_info_json) if structured_info_json else {}
+    
     user_prompt = (
         "You are given the scoped RFP text (with unnecessary content removed) and merged structured info.\n\n"
         "=== SCOPED RFP TEXT ===\n"
@@ -77,7 +84,7 @@ def run_requirements_agent(
     )
 
     logger.info(
-        "Requirements agent: starting (essential_chars=%d, has_structured=%s)",
+        "Requirements agent: processing (essential_chars=%d, has_structured=%s)",
         len(essential_text),
         bool(structured_info),
     )
@@ -92,7 +99,6 @@ def run_requirements_agent(
         max_tokens=None,
     )
 
-    import json
     import re
 
     def _parse_json_safely(raw: str) -> dict:
@@ -129,6 +135,40 @@ def run_requirements_agent(
         len(result.solution_requirements),
         len(result.response_structure_requirements),
     )
+    return result
+
+
+def run_requirements_agent(
+    essential_text: str,
+    structured_info: Dict[str, Any],
+) -> RequirementsResult:
+    """
+    Runs the requirements agent on scoped text and structured info.
+    Results are cached using LRU cache based on essential_text and structured_info.
+    """
+    # Convert structured_info to JSON string for caching (dicts aren't hashable)
+    structured_info_json = json.dumps(structured_info, sort_keys=True) if structured_info else "{}"
+    
+    cache_info = _run_requirements_agent_cached.cache_info()
+    logger.info(
+        "Requirements agent: starting (essential_chars=%d, has_structured=%s, cache_hits=%d, cache_misses=%d, cache_size=%d/%d)",
+        len(essential_text),
+        bool(structured_info),
+        cache_info.hits,
+        cache_info.misses,
+        cache_info.currsize,
+        cache_info.maxsize,
+    )
+    
+    result = _run_requirements_agent_cached(essential_text, structured_info_json)
+    
+    # Check if this was a cache hit
+    new_cache_info = _run_requirements_agent_cached.cache_info()
+    if new_cache_info.hits > cache_info.hits:
+        logger.info("Requirements agent: cache HIT - returned cached result")
+    else:
+        logger.info("Requirements agent: cache MISS - processed new request")
+    
     return result
 
 

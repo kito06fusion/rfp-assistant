@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import logging
 from dataclasses import dataclass, asdict
 from typing import Any, Dict
@@ -100,9 +101,12 @@ Return only valid JSON.
 """
 
 
-def run_scope_agent(
-    translated_text: str,
-) -> ScopeResult:
+@functools.lru_cache(maxsize=128)
+def _run_scope_agent_cached(translated_text: str) -> ScopeResult:
+    """
+    Internal cached version of scope agent.
+    Cache key is based on translated_text.
+    """
     import json
     import re
 
@@ -232,7 +236,7 @@ def run_scope_agent(
             return {}
 
     logger.info(
-        "Scope agent: starting (translated_chars=%d)",
+        "Scope agent: processing (translated_chars=%d)",
         len(translated_text),
     )
 
@@ -350,6 +354,35 @@ def run_scope_agent(
         len(result.essential_text or ""),
         len(result.removed_text or ""),
     )
+    return result
+
+
+def run_scope_agent(
+    translated_text: str,
+) -> ScopeResult:
+    """
+    Runs the scope agent on translated text.
+    Results are cached using LRU cache based on translated text.
+    """
+    cache_info = _run_scope_agent_cached.cache_info()
+    logger.info(
+        "Scope agent: starting (translated_chars=%d, cache_hits=%d, cache_misses=%d, cache_size=%d/%d)",
+        len(translated_text),
+        cache_info.hits,
+        cache_info.misses,
+        cache_info.currsize,
+        cache_info.maxsize,
+    )
+    
+    result = _run_scope_agent_cached(translated_text)
+    
+    # Check if this was a cache hit
+    new_cache_info = _run_scope_agent_cached.cache_info()
+    if new_cache_info.hits > cache_info.hits:
+        logger.info("Scope agent: cache HIT - returned cached result")
+    else:
+        logger.info("Scope agent: cache MISS - processed new request")
+    
     return result
 
 

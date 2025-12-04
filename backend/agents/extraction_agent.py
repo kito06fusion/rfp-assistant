@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import logging
 from dataclasses import dataclass, asdict
 from typing import Any, Dict
@@ -54,16 +55,18 @@ Respond with STRICTLY valid JSON. Do not include explanations.
 """
 
 
-def run_extraction_agent(document_text: str) -> ExtractionResult:
+@functools.lru_cache(maxsize=128)
+def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
     """
-    Runs the extraction agent on raw document text.
+    Internal cached version of extraction agent.
+    Cache key is based on document_text.
     """
     user_prompt = (
         "Here is the raw text of an RFP / tender document:\n\n"
         f"```rfp_text\n{document_text}\n```"
     )
 
-    logger.info("Extraction agent: starting (input_chars=%d)", len(document_text))
+    logger.info("Extraction agent: processing (input_chars=%d)", len(document_text))
 
     content = chat_completion(
         model=EXTRACTION_MODEL,
@@ -170,6 +173,33 @@ def run_extraction_agent(document_text: str) -> ExtractionResult:
         len(result.cpv_codes),
         len(result.other_codes),
     )
+    return result
+
+
+def run_extraction_agent(document_text: str) -> ExtractionResult:
+    """
+    Runs the extraction agent on raw document text.
+    Results are cached using LRU cache based on document text.
+    """
+    cache_info = _run_extraction_agent_cached.cache_info()
+    logger.info(
+        "Extraction agent: starting (input_chars=%d, cache_hits=%d, cache_misses=%d, cache_size=%d/%d)",
+        len(document_text),
+        cache_info.hits,
+        cache_info.misses,
+        cache_info.currsize,
+        cache_info.maxsize,
+    )
+    
+    result = _run_extraction_agent_cached(document_text)
+    
+    # Check if this was a cache hit
+    new_cache_info = _run_extraction_agent_cached.cache_info()
+    if new_cache_info.hits > cache_info.hits:
+        logger.info("Extraction agent: cache HIT - returned cached result")
+    else:
+        logger.info("Extraction agent: cache MISS - processed new request")
+    
     return result
 
 
