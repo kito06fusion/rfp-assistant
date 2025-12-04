@@ -8,7 +8,7 @@ from backend.llm.client import chat_completion
 
 
 logger = logging.getLogger(__name__)
-EXTRACTION_MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
+EXTRACTION_MODEL = "meta-llama/Llama-3.2-1B-Instruct"
 
 
 @dataclass
