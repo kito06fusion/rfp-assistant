@@ -46,21 +46,21 @@ def run_rfp_pipeline(rfp_text: str, request_id: Optional[str] = None) -> RFPPipe
     # Pass only the plain OCR text to the scope agent (no structured info)
     scope_res = run_scope_agent(translated_text=rfp_text)
     logger.info(
-        "REQUEST %s: scope complete (essential_chars=%d, removed_chars=%d)",
+        "REQUEST %s: scope complete (removed_chars=%d, cleaned_chars=%d)",
         rid,
-        len(scope_res.essential_text or ""),
         len(scope_res.removed_text or ""),
+        len(scope_res.cleaned_text or ""),
     )
 
     # NOTE (human-in-the-loop):
     # In a real application you would persist `scope_res` and present it to a user
-    # who can approve or edit `scope_res.essential_text` before moving to the next step.
+    # who can approve or edit the removed text before moving to the next step.
     # For now we assume automatic approval.
 
     logger.info("REQUEST %s: step 3/3 – requirements agent", rid)
-    # Requirements agent only receives the scoped essential text (no structured info)
+    # Requirements agent receives the cleaned text (original text with removed parts deleted)
     requirements_res = run_requirements_agent(
-        essential_text=scope_res.essential_text,
+        essential_text=scope_res.cleaned_text,
         structured_info={},
     )
     logger.info(

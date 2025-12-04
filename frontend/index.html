@@ -309,6 +309,141 @@
         }
       }
 
+      function formatExtractionOutput(extraction) {
+        if (!extraction) return "No extraction data available.";
+        
+        let output = "📋 EXTRACTION RESULTS\n";
+        output += "=".repeat(60) + "\n\n";
+        
+        output += "🌐 Language: " + (extraction.language || "Unknown") + "\n\n";
+        
+        if (extraction.cpv_codes && extraction.cpv_codes.length > 0) {
+          output += "🏷️  CPV Codes (" + extraction.cpv_codes.length + "):\n";
+          extraction.cpv_codes.forEach((code, idx) => {
+            output += "   " + (idx + 1) + ". " + code + "\n";
+          });
+          output += "\n";
+        } else {
+          output += "🏷️  CPV Codes: None found\n\n";
+        }
+        
+        if (extraction.other_codes && extraction.other_codes.length > 0) {
+          output += "🔖 Other Codes (" + extraction.other_codes.length + "):\n";
+          extraction.other_codes.forEach((code, idx) => {
+            output += "   " + (idx + 1) + ". " + code + "\n";
+          });
+          output += "\n";
+        } else {
+          output += "🔖 Other Codes: None found\n\n";
+        }
+        
+        if (extraction.key_requirements_summary) {
+          output += "📝 Key Requirements Summary:\n";
+          output += "-".repeat(60) + "\n";
+          output += extraction.key_requirements_summary + "\n\n";
+        }
+        
+        if (extraction.raw_structured && Object.keys(extraction.raw_structured).length > 0) {
+          output += "📊 Additional Metadata:\n";
+          output += "-".repeat(60) + "\n";
+          for (const [key, value] of Object.entries(extraction.raw_structured)) {
+            output += key + ": " + JSON.stringify(value) + "\n";
+          }
+        }
+        
+        return output;
+      }
+
+      function formatScopeOutput(scope) {
+        if (!scope) return "No scope data available.";
+        
+        let output = "🎯 SCOPE ANALYSIS\n";
+        output += "=".repeat(60) + "\n\n";
+        
+        if (scope.rationale) {
+          output += "💭 Rationale:\n";
+          output += "-".repeat(60) + "\n";
+          output += scope.rationale + "\n\n";
+        }
+        
+        if (scope.removed_text && scope.removed_text.trim().length > 0) {
+          output += "❌ TEXT IDENTIFIED FOR REMOVAL\n";
+          output += "-".repeat(60) + "\n";
+          const removed = scope.removed_text.length > 2000
+            ? scope.removed_text.substring(0, 2000) + "\n\n[... truncated, showing first 2000 characters ...]"
+            : scope.removed_text;
+          output += removed + "\n\n";
+        } else {
+          output += "❌ TEXT IDENTIFIED FOR REMOVAL: None\n\n";
+        }
+        
+        output += "✅ CLEANED TEXT (After Removal)\n";
+        output += "-".repeat(60) + "\n";
+        if (scope.cleaned_text) {
+          const cleaned = scope.cleaned_text.length > 3000 
+            ? scope.cleaned_text.substring(0, 3000) + "\n\n[... truncated, showing first 3000 characters ...]"
+            : scope.cleaned_text;
+          output += cleaned + "\n\n";
+        } else {
+          output += "No cleaned text available.\n\n";
+        }
+        
+        return output;
+      }
+
+      function formatRequirementsOutput(requirements) {
+        if (!requirements) return "No requirements data available.";
+        
+        let output = "📋 REQUIREMENTS ANALYSIS\n";
+        output += "=".repeat(60) + "\n\n";
+        
+        if (requirements.notes) {
+          output += "📝 Notes:\n";
+          output += "-".repeat(60) + "\n";
+          output += requirements.notes + "\n\n";
+        }
+        
+        if (requirements.solution_requirements && requirements.solution_requirements.length > 0) {
+          output += "💡 SOLUTION REQUIREMENTS (" + requirements.solution_requirements.length + ")\n";
+          output += "=".repeat(60) + "\n\n";
+          requirements.solution_requirements.forEach((req, idx) => {
+            output += "[" + (idx + 1) + "] " + req.id + " - " + req.category + "\n";
+            output += "Type: " + req.type + "\n";
+            output += "Normalized: " + req.normalized_text + "\n";
+            output += "Source Text:\n";
+            output += "-".repeat(50) + "\n";
+            const sourceText = req.source_text.length > 500
+              ? req.source_text.substring(0, 500) + "\n[... truncated ...]"
+              : req.source_text;
+            output += sourceText + "\n";
+            output += "\n";
+          });
+        } else {
+          output += "💡 SOLUTION REQUIREMENTS: None found\n\n";
+        }
+        
+        if (requirements.response_structure_requirements && requirements.response_structure_requirements.length > 0) {
+          output += "📄 RESPONSE STRUCTURE REQUIREMENTS (" + requirements.response_structure_requirements.length + ")\n";
+          output += "=".repeat(60) + "\n\n";
+          requirements.response_structure_requirements.forEach((req, idx) => {
+            output += "[" + (idx + 1) + "] " + req.id + " - " + req.category + "\n";
+            output += "Type: " + req.type + "\n";
+            output += "Normalized: " + req.normalized_text + "\n";
+            output += "Source Text:\n";
+            output += "-".repeat(50) + "\n";
+            const sourceText = req.source_text.length > 500
+              ? req.source_text.substring(0, 500) + "\n[... truncated ...]"
+              : req.source_text;
+            output += sourceText + "\n";
+            output += "\n";
+          });
+        } else {
+          output += "📄 RESPONSE STRUCTURE REQUIREMENTS: None found\n\n";
+        }
+        
+        return output;
+      }
+
       function updateAgentStatus(agent, status, pill, statusText) {
         pill.className = "pill";
         if (status === "processing") {
@@ -392,17 +527,13 @@
           }
 
           updateAgentStatus("extraction", "complete", extractionPill, extractionStatus);
-          extractionOutput.textContent = formatJson(data.extraction);
+          extractionOutput.textContent = formatExtractionOutput(data.extraction);
           const extSummary = `Language: ${data.extraction?.language || "unknown"}, CPV codes: ${data.extraction?.cpv_codes?.length || 0}, Other codes: ${data.extraction?.other_codes?.length || 0}`;
           document.getElementById("extraction-summary").innerHTML = `<strong>Status:</strong> Complete<br><strong>Summary:</strong> ${extSummary}`;
 
           updateAgentStatus("scope", "complete", scopePill, scopeStatus);
-          scopeOutput.textContent = formatJson({
-            essential_text: data.scope?.essential_text?.substring(0, 2000) + (data.scope?.essential_text?.length > 2000 ? "..." : ""),
-            removed_text: data.scope?.removed_text?.substring(0, 1000) + (data.scope?.removed_text?.length > 1000 ? "..." : ""),
-            rationale: data.scope?.rationale,
-          });
-          const scopeSummary = `Essential: ${data.scope?.essential_text?.length || 0} chars, Removed: ${data.scope?.removed_text?.length || 0} chars`;
+          scopeOutput.textContent = formatScopeOutput(data.scope);
+          const scopeSummary = `Removed: ${data.scope?.removed_text?.length || 0} chars, Cleaned: ${data.scope?.cleaned_text?.length || 0} chars`;
           document.getElementById("scope-summary").innerHTML = `<strong>Status:</strong> Complete<br><strong>Summary:</strong> ${scopeSummary}`;
 
           updateAgentStatus("requirements", "waiting", reqPill, reqStatus);
@@ -435,7 +566,7 @@
                 "Content-Type": "application/json",
               },
               body: JSON.stringify({
-                essential_text: lastPipelineResult.scope?.essential_text || "",
+                essential_text: lastPipelineResult.scope?.cleaned_text || "",
               }),
             });
 
@@ -453,7 +584,7 @@
             const reqData = await response.json();
             lastPipelineResult.requirements = reqData;
 
-            requirementsOutput.textContent = formatJson(reqData);
+            requirementsOutput.textContent = formatRequirementsOutput(reqData);
             const reqSummary = `Solution: ${reqData?.solution_requirements?.length || 0}, Response structure: ${reqData?.response_structure_requirements?.length || 0}`;
             document.getElementById("req-summary").innerHTML = `<strong>Status:</strong> Complete<br><strong>Summary:</strong> ${reqSummary}`;
             reqPill.classList.add("pill-ok");

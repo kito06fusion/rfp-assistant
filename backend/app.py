@@ -125,10 +125,10 @@ async def process_rfp(file: UploadFile = File(...)) -> Dict[str, Any]:
 
     elapsed = time.time() - t0
     logger.info(
-        "REQUEST %s: scope agent finished (essential_chars=%d, removed_chars=%d)",
+        "REQUEST %s: scope agent finished (removed_chars=%d, cleaned_chars=%d)",
         request_id,
-        len(scope_res.essential_text or ""),
         len(scope_res.removed_text or ""),
+        len(scope_res.cleaned_text or ""),
     )
     logger.info("REQUEST %s: extraction + scope completed in %.2fs", request_id, elapsed)
 

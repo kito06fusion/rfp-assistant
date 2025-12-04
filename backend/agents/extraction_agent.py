@@ -25,8 +25,14 @@ Tasks:
 3. Extract ONLY the information that is explicitly stated in the document. Do NOT invent, guess, or infer information that is not present.
 
 Extract the following information ONLY if it appears in the document text:
-   - CPV codes or similar classification codes: ONLY extract codes that are explicitly written in the document (e.g., "CPV 12345678" or "CPV code: 12345678"). If no CPV codes are mentioned, return an empty list.
-   - Other classification codes: ONLY extract codes that are explicitly written (e.g., UNSPSC, NAICS, NUTS codes). Include the code type and value exactly as written. If no codes are mentioned, return an empty list.
+   - CPV codes or similar classification codes: ONLY extract codes that are explicitly written in the document (e.g., "CPV 12345678" or "CPV code: 12345678"). 
+     * CRITICAL: Do NOT create or invent codes. Only extract codes that are literally written in the document.
+     * Do NOT extract placeholder codes like "12345678" unless they are explicitly written in the document.
+     * If you see text like "CPV code: [to be filled]" or "CPV: TBD", do NOT extract anything.
+     * If no CPV codes are mentioned or only placeholders are mentioned, return an empty list [].
+   - Other classification codes: ONLY extract codes that are explicitly written (e.g., UNSPSC, NAICS, NUTS codes). Include the code type and value exactly as written.
+     * CRITICAL: Do NOT create or invent codes. Only extract codes that are literally written.
+     * If no codes are mentioned or only placeholders are mentioned, return an empty list [].
    - Tender identifiers or reference numbers: ONLY if explicitly stated (e.g., "RFP No: 2024/01").
    - Deadlines and key dates: ONLY if explicitly stated with dates.
    - Contract duration and options for extension: ONLY if explicitly mentioned.
@@ -35,12 +41,16 @@ Extract the following information ONLY if it appears in the document text:
    - Disqualifying conditions: ONLY if explicitly stated (e.g., "late submission will result in rejection").
 4. Provide a concise summary (10–15 bullet points) of the key solution and response requirements based ONLY on what is stated in the document.
 
-CRITICAL RULES:
+CRITICAL RULES - READ CAREFULLY:
 - Extract ONLY information that is explicitly written in the document text.
 - Do NOT invent, guess, or create codes that are not present.
+- Do NOT extract placeholder codes like "12345678" unless they are explicitly written in the document.
+- Do NOT extract generic numbers that look like codes but are not explicitly labeled as codes.
 - If a field is not mentioned in the document, return an empty list or empty string.
-- For codes: Only include codes that are literally written in the document (e.g., "CPV 12345678" or "CPV code 12345678").
+- For codes: Only include codes that are literally written in the document with their code type (e.g., "CPV 12345678" or "CPV code: 12345678").
 - If you see "CPV" or "classification code" mentioned but no actual code numbers, do NOT create fake codes.
+- If you see placeholder text like "[code]", "[TBD]", "[to be filled]", do NOT extract anything.
+- When in doubt, return an empty list. It is better to miss a code than to invent one.
 
 Output JSON ONLY, with the following top-level keys:
 - language: ISO language name or code (e.g., "en", "fr").
@@ -59,9 +69,14 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
     user_prompt = (
         "Here is the raw text of an RFP / tender document:\n\n"
         f"```rfp_text\n{document_text}\n```\n\n"
-        "IMPORTANT: Extract ONLY information that is explicitly written in the document above. "
-        "Do NOT invent or create codes, numbers, or identifiers that are not present in the text. "
-        "If codes are not mentioned, return empty lists. Only extract what you can see written in the document."
+        "CRITICAL INSTRUCTIONS:\n"
+        "- Extract ONLY information that is explicitly written in the document above.\n"
+        "- Do NOT invent or create codes, numbers, or identifiers that are not present in the text.\n"
+        "- Do NOT extract placeholder codes like '12345678' unless they are explicitly written in the document.\n"
+        "- If codes are not mentioned or only placeholders are mentioned, return empty lists [].\n"
+        "- Only extract codes that you can see written with their code type (e.g., 'CPV 12345678' or 'CPV code: 12345678').\n"
+        "- When in doubt, return an empty list. It is better to miss a code than to invent one.\n"
+        "- Only extract what you can see written in the document."
     )
 
     logger.info("Extraction agent: processing (input_chars=%d)", len(document_text))
@@ -139,11 +154,46 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
             "metadata": {},
         }
 
+
+    def _filter_suspicious_codes(codes: list) -> list:
+        """Filter out codes that look like placeholders or generic numbers."""
+        filtered = []
+        for code in codes:
+            if not code or not isinstance(code, str):
+                continue
+            code_str = str(code).strip()
+
+            if not code_str:
+                continue
+
+            code_lower = code_str.lower()
+            
+
+            if any(prefix in code_lower for prefix in ['cpv', 'unspsc', 'naics', 'nuts', 'code:', 'code ', 'classification']):
+                filtered.append(code_str)
+                continue
+            
+
+            if code_str.isdigit() and len(code_str) >= 6:
+                logger.warning(
+                    "Extraction agent: Filtered out suspicious standalone numeric code (likely hallucination): %s. "
+                    "Real codes should have prefixes like 'CPV' or 'UNSPSC'.",
+                    code_str
+                )
+                continue
+            
+
+            filtered.append(code_str)
+        return filtered
+    
+    cpv_codes = _filter_suspicious_codes(data.get("cpv_codes", []) or [])
+    other_codes = _filter_suspicious_codes(data.get("other_codes", []) or [])
+    
     result = ExtractionResult(
         translated_text="",
         language=data.get("language", "en"),
-        cpv_codes=data.get("cpv_codes", []) or [],
-        other_codes=data.get("other_codes", []) or [],
+        cpv_codes=cpv_codes,
+        other_codes=other_codes,
         key_requirements_summary=data.get("key_requirements_summary", ""),
         raw_structured=data.get("metadata", {}) or {},
     )
