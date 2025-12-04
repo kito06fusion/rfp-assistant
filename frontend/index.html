@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>RFP Assistant</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        margin: 0;
+        padding: 0;
+        background: #0f172a;
+        color: #e5e7eb;
+      }
+      header {
+        padding: 1.5rem 2rem;
+        background: #020617;
+        border-bottom: 1px solid #1f2937;
+      }
+      main {
+        max-width: 1100px;
+        margin: 1.5rem auto 3rem;
+        padding: 0 1.5rem;
+      }
+      h1 {
+        font-size: 1.6rem;
+        margin: 0;
+      }
+      .card {
+        background: #020617;
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        border: 1px solid #1f2937;
+        margin-bottom: 1.5rem;
+      }
+      .card h2 {
+        margin-top: 0;
+        font-size: 1.2rem;
+      }
+      .subheading {
+        font-size: 0.9rem;
+        color: #9ca3af;
+        margin-bottom: 0.5rem;
+      }
+      .upload-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+      }
+      input[type="file"] {
+        color: #e5e7eb;
+      }
+      button {
+        background: #2563eb;
+        border: none;
+        color: white;
+        padding: 0.6rem 1.2rem;
+        border-radius: 999px;
+        cursor: pointer;
+        font-size: 0.95rem;
+      }
+      button[disabled] {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .status {
+        margin-top: 0.75rem;
+        font-size: 0.9rem;
+        color: #9ca3af;
+      }
+      .columns {
+        display: block;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        border: 1px solid #1f2937;
+        background: #020617;
+        color: #9ca3af;
+      }
+      pre {
+        max-height: 260px;
+        overflow: auto;
+        padding: 0.75rem;
+        background: #020617;
+        border-radius: 0.5rem;
+        border: 1px solid #1f2937;
+        font-size: 0.8rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .agent-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+      }
+      .pill {
+        font-size: 0.75rem;
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        border: 1px solid #1f2937;
+        color: #9ca3af;
+        background: #020617;
+      }
+      .pill-processing {
+        border-color: #f59e0b;
+        color: #fbbf24;
+        animation: pulse 2s infinite;
+      }
+      .pill-complete {
+        border-color: #16a34a;
+        color: #bbf7d0;
+      }
+      .pill-error {
+        border-color: #dc2626;
+        color: #fca5a5;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+      }
+      .agent-summary {
+        font-size: 0.85rem;
+        color: #6b7280;
+        margin-bottom: 0.75rem;
+        padding: 0.5rem;
+        background: #020617;
+        border-radius: 0.5rem;
+        border: 1px solid #1f2937;
+      }
+      .agent-summary strong {
+        color: #9ca3af;
+      }
+      .accept-row {
+        margin-top: 0.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.85rem;
+        color: #9ca3af;
+      }
+      .accept-row input {
+        accent-color: #22c55e;
+      }
+      .tabs {
+        display: flex;
+        border-bottom: 1px solid #1f2937;
+        margin-bottom: 1rem;
+      }
+      .tab-button {
+        padding: 0.6rem 1rem;
+        font-size: 0.9rem;
+        border: none;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        color: #9ca3af;
+        cursor: pointer;
+      }
+      .tab-button.active {
+        color: #e5e7eb;
+        border-bottom-color: #2563eb;
+      }
+      .tab-button:not(.active):hover {
+        background: #020617;
+      }
+      .tab-panel {
+        display: none;
+      }
+      .tab-panel.active {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>RFP Assistant</h1>
+      <div style="font-size: 0.9rem; color: #9ca3af; margin-top: 0.35rem">
+        Upload an RFP (PDF/DOCX), then inspect each agent’s output and approve
+        the scoped text before viewing requirements.
+      </div>
+    </header>
+    <main>
+      <section class="card">
+        <h2>1. Upload RFP</h2>
+        <div class="upload-row">
+          <input id="file-input" type="file" accept=".pdf,.doc,.docx" />
+          <button id="upload-btn">Upload &amp; process</button>
+        </div>
+        <div id="status" class="status"></div>
+      </section>
+
+      <section class="card" id="agents-section" style="display: none">
+        <div class="tabs">
+          <button class="tab-button active" data-tab="ocr">1. OCR (Qwen)</button>
+          <button class="tab-button" data-tab="extraction">2. Extraction agent</button>
+          <button class="tab-button" data-tab="scope">3. Scope</button>
+          <button class="tab-button" data-tab="requirements">4. Requirements</button>
+        </div>
+
+        <div class="columns">
+          <!-- Tab 1: Raw OCR text -->
+          <div id="tab-ocr" class="tab-panel active">
+            <div class="agent-header">
+              <h2>1. Raw OCR Text</h2>
+              <span class="pill">Qwen/Qwen2.5-VL-7B-Instruct</span>
+            </div>
+            <div class="agent-summary">
+              <strong>Description:</strong> Full text extracted by Qwen from the original PDF/DOCX (all pages, no filtering).
+            </div>
+            <pre id="ocr-output">Waiting for OCR…</pre>
+          </div>
+
+          <!-- Tab 2: Extraction agent -->
+          <div id="tab-extraction" class="tab-panel">
+            <div class="agent-header">
+              <h2>2. Extraction Agent</h2>
+              <span id="extraction-pill" class="pill">meta-llama/Llama-3.2-1B</span>
+            </div>
+            <div class="agent-summary" id="extraction-summary">
+              <strong>Status:</strong> <span id="extraction-status">Waiting...</span>
+            </div>
+            <div class="badge">Translated text + codes &amp; metadata</div>
+            <pre id="extraction-output">Processing...</pre>
+          </div>
+
+          <!-- Tab 3: Scope agent -->
+          <div id="tab-scope" class="tab-panel">
+            <div class="agent-header">
+              <h2>3. Scope Agent</h2>
+              <span id="scope-pill" class="pill">google/gemma-2-2b-it</span>
+            </div>
+            <div class="agent-summary" id="scope-summary">
+              <strong>Status:</strong> <span id="scope-status">Waiting...</span>
+            </div>
+            <div class="badge">Essential text vs removed content</div>
+            <pre id="scope-output">Waiting for extraction...</pre>
+            <div class="accept-row">
+              <input type="checkbox" id="accept-scope" />
+              <label for="accept-scope">I accept this scoped text</label>
+            </div>
+          </div>
+
+          <!-- Tab 4: Requirements agent -->
+          <div id="tab-requirements" class="tab-panel">
+            <div class="agent-header">
+              <h2>4. Requirements Agent</h2>
+              <span id="req-pill" class="pill">meta-llama/Llama-3.1-8B</span>
+            </div>
+            <div class="agent-summary" id="req-summary">
+              <strong>Status:</strong> <span id="req-status">Waiting...</span>
+            </div>
+            <div class="badge">
+              Solution vs response-structure requirements
+            </div>
+            <pre id="requirements-output">Accept scoped text to reveal…</pre>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const API_BASE = "http://127.0.0.1:8001";
+
+      const fileInput = document.getElementById("file-input");
+      const uploadBtn = document.getElementById("upload-btn");
+      const statusEl = document.getElementById("status");
+      const agentsSection = document.getElementById("agents-section");
+      const extractionOutput = document.getElementById("extraction-output");
+      const ocrOutput = document.getElementById("ocr-output");
+      const scopeOutput = document.getElementById("scope-output");
+      const requirementsOutput = document.getElementById(
+        "requirements-output",
+      );
+      const acceptScope = document.getElementById("accept-scope");
+      const reqPill = document.getElementById("req-pill");
+      const extractionPill = document.getElementById("extraction-pill");
+      const scopePill = document.getElementById("scope-pill");
+      const extractionStatus = document.getElementById("extraction-status");
+      const scopeStatus = document.getElementById("scope-status");
+      const reqStatus = document.getElementById("req-status");
+
+      let lastPipelineResult = null;
+
+      function setStatus(text, isError = false) {
+        statusEl.textContent = text;
+        statusEl.style.color = isError ? "#f97373" : "#9ca3af";
+      }
+
+      function formatJson(obj) {
+        try {
+          return JSON.stringify(obj, null, 2);
+        } catch (e) {
+          return String(obj);
+        }
+      }
+
+      function updateAgentStatus(agent, status, pill, statusText) {
+        pill.className = "pill";
+        if (status === "processing") {
+          pill.classList.add("pill-processing");
+          statusText.textContent = "Processing...";
+        } else if (status === "complete") {
+          pill.classList.add("pill-complete");
+          statusText.textContent = "Complete";
+        } else if (status === "error") {
+          pill.classList.add("pill-error");
+          statusText.textContent = "Error";
+        } else {
+          statusText.textContent = "Waiting...";
+        }
+      }
+
+      function switchTab(tabName) {
+        document.querySelectorAll(".tab-button").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.tab === tabName);
+        });
+        document.querySelectorAll(".tab-panel").forEach((panel) => {
+          panel.classList.toggle(
+            "active",
+            panel.id === `tab-${tabName}`,
+          );
+        });
+      }
+
+      document.querySelectorAll(".tab-button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          switchTab(btn.dataset.tab);
+        });
+      });
+
+      uploadBtn.addEventListener("click", async () => {
+        const file = fileInput.files[0];
+        if (!file) {
+          setStatus("Please choose a PDF or DOCX file first.", true);
+          return;
+        }
+
+        uploadBtn.disabled = true;
+        acceptScope.checked = false;
+        requirementsOutput.textContent = "Accept scoped text to reveal…";
+        reqPill.classList.remove("pill-ok");
+        
+        // Reset all agent statuses
+        updateAgentStatus("extraction", "processing", extractionPill, extractionStatus);
+        updateAgentStatus("scope", "waiting", scopePill, scopeStatus);
+        updateAgentStatus("requirements", "waiting", reqPill, reqStatus);
+        extractionOutput.textContent = "Processing...";
+        ocrOutput.textContent = "Waiting for OCR…";
+        scopeOutput.textContent = "Waiting for extraction...";
+        
+        agentsSection.style.display = "block";
+        setStatus("Uploading and running agents… this may take a moment.");
+
+        try {
+          const form = new FormData();
+          form.append("file", file);
+
+          const response = await fetch(`${API_BASE}/process-rfp`, {
+            method: "POST",
+            body: form,
+          });
+
+          if (!response.ok) {
+            const text = await response.text();
+            updateAgentStatus("extraction", "error", extractionPill, extractionStatus);
+            throw new Error(
+              `Backend error ${response.status}: ${text.slice(0, 200)}`,
+            );
+          }
+
+          const data = await response.json();
+          lastPipelineResult = data;
+
+          // Show raw OCR text from Qwen in OCR tab (full text, no truncation)
+          if (data.ocr_source_text) {
+            ocrOutput.textContent = data.ocr_source_text;
+          } else {
+            ocrOutput.textContent = "No OCR text returned.";
+          }
+
+          // Update extraction agent tab
+          updateAgentStatus("extraction", "complete", extractionPill, extractionStatus);
+          extractionOutput.textContent = formatJson(data.extraction);
+          const extSummary = `Language: ${data.extraction?.language || "unknown"}, CPV codes: ${data.extraction?.cpv_codes?.length || 0}, Other codes: ${data.extraction?.other_codes?.length || 0}`;
+          document.getElementById("extraction-summary").innerHTML = `<strong>Status:</strong> Complete<br><strong>Summary:</strong> ${extSummary}`;
+
+          // Update scope agent
+          updateAgentStatus("scope", "complete", scopePill, scopeStatus);
+          scopeOutput.textContent = formatJson({
+            essential_text: data.scope?.essential_text?.substring(0, 2000) + (data.scope?.essential_text?.length > 2000 ? "..." : ""),
+            removed_text: data.scope?.removed_text?.substring(0, 1000) + (data.scope?.removed_text?.length > 1000 ? "..." : ""),
+            rationale: data.scope?.rationale,
+          });
+          const scopeSummary = `Essential: ${data.scope?.essential_text?.length || 0} chars, Removed: ${data.scope?.removed_text?.length || 0} chars`;
+          document.getElementById("scope-summary").innerHTML = `<strong>Status:</strong> Complete<br><strong>Summary:</strong> ${scopeSummary}`;
+
+          // Update requirements agent
+          updateAgentStatus("requirements", "complete", reqPill, reqStatus);
+          const reqSummary = `Solution: ${data.requirements?.solution_requirements?.length || 0}, Response structure: ${data.requirements?.response_structure_requirements?.length || 0}`;
+          document.getElementById("req-summary").innerHTML = `<strong>Status:</strong> Complete<br><strong>Summary:</strong> ${reqSummary}`;
+
+          setStatus("Pipeline finished. Review each agent's output.");
+
+          // After processing, show OCR tab first
+          switchTab("ocr");
+        } catch (err) {
+          console.error(err);
+          setStatus(`Failed to process file: ${err.message}`, true);
+          updateAgentStatus("extraction", "error", extractionPill, extractionStatus);
+        } finally {
+          uploadBtn.disabled = false;
+        }
+      });
+
+      acceptScope.addEventListener("change", () => {
+        if (!lastPipelineResult) return;
+        if (acceptScope.checked) {
+          requirementsOutput.textContent = formatJson(
+            lastPipelineResult.requirements,
+          );
+          reqPill.classList.add("pill-ok");
+        } else {
+          requirementsOutput.textContent = "Accept scoped text to reveal…";
+          reqPill.classList.remove("pill-ok");
+        }
+      });
+    </script>
+  </body>
+  </html>
+
+
