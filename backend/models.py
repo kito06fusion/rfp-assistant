@@ -19,9 +19,12 @@ class ExtractionResult(BaseModel):
 
 
 class ScopeResult(BaseModel):
-    removed_text: str = Field(description="Exact text snippets that are NOT necessary and should be removed")
-    rationale: str = Field(default="", description="Explanation of what was identified as unnecessary")
-    cleaned_text: str = Field(default="", description="Original text with removed parts deleted (computed after removal)")
+    necessary_text: str = Field(description="Text that is necessary to create a response to this RFP")
+    removed_text: str = Field(default="", description="Text that was removed/excluded as out-of-scope administrative content")
+    rationale: str = Field(default="", description="Explanation of what was excluded and why")
+    cleaned_text: str = Field(default="", description="Same as necessary_text (kept for backward compatibility)")
+    comparison_agreement: bool = Field(default=True, description="Whether the comparison step agreed that necessary_text contains all necessary information")
+    comparison_notes: str = Field(default="", description="Notes from the comparison validation step")
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -37,8 +40,6 @@ class RequirementItem(BaseModel):
 
 
 class RequirementsResult(BaseModel):
-    """Output model for the requirements agent."""
-
     solution_requirements: List[RequirementItem] = Field(
         default_factory=list,
         description="List of solution requirements (what the buyer wants)",

@@ -11,76 +11,42 @@ from backend.models import ExtractionResult
 
 
 logger = logging.getLogger(__name__)
-EXTRACTION_MODEL = "meta-llama/Llama-3.2-1B-Instruct"
+EXTRACTION_MODEL = "gpt-5-chat"
 
 
 EXTRACTION_SYSTEM_PROMPT = """
-You are an expert procurement and public-sector tender analyst.
-
-You receive the raw text of a Request for Proposal (RFP) or tender document.
+You are an RFP analyst. Extract ONLY information explicitly written in the document.
 
 Tasks:
-1. Detect the language of the document.
-2. If the document is not in English, translate it into clear, professional English.
-3. Extract ONLY the information that is explicitly stated in the document. Do NOT invent, guess, or infer information that is not present.
+1. Detect language (ISO code: "en", "fr", etc.)
+2. Translate to English if needed
+3. Extract codes - ONLY if explicitly stated
+4. Provide 10-15 bullet summary of key requirements
 
-Extract the following information ONLY if it appears in the document text:
-   - CPV codes or similar classification codes: ONLY extract codes that are explicitly written in the document (e.g., "CPV 12345678" or "CPV code: 12345678"). 
-     * CRITICAL: Do NOT create or invent codes. Only extract codes that are literally written in the document.
-     * Do NOT extract placeholder codes like "12345678" unless they are explicitly written in the document.
-     * If you see text like "CPV code: [to be filled]" or "CPV: TBD", do NOT extract anything.
-     * If no CPV codes are mentioned or only placeholders are mentioned, return an empty list [].
-   - Other classification codes: ONLY extract codes that are explicitly written (e.g., UNSPSC, NAICS, NUTS codes). Include the code type and value exactly as written.
-     * CRITICAL: Do NOT create or invent codes. Only extract codes that are literally written.
-     * If no codes are mentioned or only placeholders are mentioned, return an empty list [].
-   - Tender identifiers or reference numbers: ONLY if explicitly stated (e.g., "RFP No: 2024/01").
-   - Deadlines and key dates: ONLY if explicitly stated with dates.
-   - Contract duration and options for extension: ONLY if explicitly mentioned.
-   - Budget / estimated contract value: ONLY if explicitly stated with numbers.
-   - Mandatory requirements versus optional/desired requirements: Extract from explicit statements.
-   - Disqualifying conditions: ONLY if explicitly stated (e.g., "late submission will result in rejection").
-4. Provide a concise summary (10–15 bullet points) of the key solution and response requirements based ONLY on what is stated in the document.
+CRITICAL RULES:
+- Do NOT invent codes. Only extract codes that are literally written with their type (e.g., "CPV 12345678"). If no codes found, return empty lists [].
+- Do NOT invent or infer dates or deadlines. Only extract dates that are explicitly written in the document. If dates are placeholders like "[DD Month YYYY]", do NOT convert them to actual dates.
+- Do NOT include a metadata field with deadlines, budget, or other inferred information. Only extract what is explicitly written.
 
-CRITICAL RULES - READ CAREFULLY:
-- Extract ONLY information that is explicitly written in the document text.
-- Do NOT invent, guess, or create codes that are not present.
-- Do NOT extract placeholder codes like "12345678" unless they are explicitly written in the document.
-- Do NOT extract generic numbers that look like codes but are not explicitly labeled as codes.
-- If a field is not mentioned in the document, return an empty list or empty string.
-- For codes: Only include codes that are literally written in the document with their code type (e.g., "CPV 12345678" or "CPV code: 12345678").
-- If you see "CPV" or "classification code" mentioned but no actual code numbers, do NOT create fake codes.
-- If you see placeholder text like "[code]", "[TBD]", "[to be filled]", do NOT extract anything.
-- When in doubt, return an empty list. It is better to miss a code than to invent one.
+Output JSON:
+- language: ISO code
+- translated_text: full English text
+- cpv_codes: list of strings (only if written in document)
+- other_codes: list of strings "TYPE: VALUE" (only if written)
+- key_requirements_summary: markdown bullets
 
-Output JSON ONLY, with the following top-level keys:
-- language: ISO language name or code (e.g., "en", "fr").
-- translated_text: full document text in English.
-- cpv_codes: list of strings. ONLY include codes that are explicitly written in the document. If none found, return empty list [].
-- other_codes: list of strings with code type and value. ONLY include codes that are explicitly written. Format as "TYPE: VALUE" (e.g., "UNSPSC: 12345678"). If none found, return empty list [].
-- key_requirements_summary: markdown bullet list (as a single string).
-- metadata: object with any additional fields you consider useful (deadlines, contract value, identifiers, etc.). Only include fields that are explicitly mentioned in the document.
-
-Respond with STRICTLY valid JSON. Do not include explanations.
+Do NOT include a metadata field. Return valid JSON only.
 """
-
 
 @functools.lru_cache(maxsize=128)
 def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
     user_prompt = (
-        "Here is the raw text of an RFP / tender document:\n\n"
-        f"```rfp_text\n{document_text}\n```\n\n"
-        "CRITICAL INSTRUCTIONS:\n"
-        "- Extract ONLY information that is explicitly written in the document above.\n"
-        "- Do NOT invent or create codes, numbers, or identifiers that are not present in the text.\n"
-        "- Do NOT extract placeholder codes like '12345678' unless they are explicitly written in the document.\n"
-        "- If codes are not mentioned or only placeholders are mentioned, return empty lists [].\n"
-        "- Only extract codes that you can see written with their code type (e.g., 'CPV 12345678' or 'CPV code: 12345678').\n"
-        "- When in doubt, return an empty list. It is better to miss a code than to invent one.\n"
-        "- Only extract what you can see written in the document."
+        f"RFP document:\n\n```rfp_text\n{document_text}\n```\n\n"
+        "Extract ONLY what is explicitly written. Do NOT invent codes or dates. Do NOT include metadata. Return empty lists if not found."
     )
-
     logger.info("Extraction agent: processing (input_chars=%d)", len(document_text))
-
+    estimated_input_tokens = len(user_prompt) // 4 + len(EXTRACTION_SYSTEM_PROMPT) // 4 + 500  # +500 for overhead
+    max_output_tokens = max(2000, min(6000, 32769 - estimated_input_tokens - 1000))  # Reduced to 6000 for extraction (simpler task)
     content = chat_completion(
         model=EXTRACTION_MODEL,
         messages=[
@@ -88,7 +54,7 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.0,
-        max_tokens=None,
+        max_tokens=max_output_tokens,
     )
 
     def _parse_json_safely(raw: str) -> dict:
@@ -97,20 +63,15 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
             .replace("```", "")
             .strip()
         )
-        
-        cleaned = re.sub(r'[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f-\x9f]', '', cleaned)
-        
+        cleaned = re.sub(r'[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f-\x9f]', '', cleaned)       
         match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
         if match:
-            cleaned = match.group(0)
-        
-        cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
-        
+            cleaned = match.group(0)        
+        cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)        
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError as e:
-            error_pos = getattr(e, 'pos', None)
-            
+            error_pos = getattr(e, 'pos', None)          
             try:
                 partial = {}
                 lang_match = re.search(r'"language"\s*:\s*"([^"]+)"', cleaned)
@@ -122,8 +83,7 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
                         cpv_str = '[' + cpv_match.group(1) + ']'
                         partial['cpv_codes'] = json.loads(cpv_str)
                     except (json.JSONDecodeError, ValueError):
-                        partial['cpv_codes'] = []
-                
+                        partial['cpv_codes'] = []       
                 if partial:
                     logger.warning(
                         "Partially parsed JSON, using extracted fields with defaults"
@@ -134,11 +94,9 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
                     }
             except Exception:
                 pass
-            
             logger.error("Failed to parse JSON after all cleanup attempts. Error at position %s", error_pos)
             logger.debug("Problematic JSON (first 1500 chars):\n%s", cleaned[:1500])
             raise ValueError(f"LLM extraction agent returned invalid JSON: {str(e)}") from e
-
     try:
         data = _parse_json_safely(content)
     except ValueError:
@@ -151,29 +109,20 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
             "cpv_codes": [],
             "other_codes": [],
             "key_requirements_summary": "",
-            "metadata": {},
         }
 
-
     def _filter_suspicious_codes(codes: list) -> list:
-        """Filter out codes that look like placeholders or generic numbers."""
         filtered = []
         for code in codes:
             if not code or not isinstance(code, str):
                 continue
             code_str = str(code).strip()
-
             if not code_str:
                 continue
-
             code_lower = code_str.lower()
-            
-
             if any(prefix in code_lower for prefix in ['cpv', 'unspsc', 'naics', 'nuts', 'code:', 'code ', 'classification']):
                 filtered.append(code_str)
                 continue
-            
-
             if code_str.isdigit() and len(code_str) >= 6:
                 logger.warning(
                     "Extraction agent: Filtered out suspicious standalone numeric code (likely hallucination): %s. "
@@ -181,21 +130,38 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
                     code_str
                 )
                 continue
-            
-
             filtered.append(code_str)
         return filtered
-    
     cpv_codes = _filter_suspicious_codes(data.get("cpv_codes", []) or [])
-    other_codes = _filter_suspicious_codes(data.get("other_codes", []) or [])
-    
+    other_codes_raw = data.get("other_codes", []) or []
+    other_codes = []
+    for code in other_codes_raw:
+        if not code or not isinstance(code, str):
+            continue
+        code_str = str(code).strip()
+        if code_str.lower() in ["type: value", "type:value", "type : value"]:
+            logger.warning("Extraction agent: Filtered out placeholder 'other_code': %s", code_str)
+            continue
+        if ":" in code_str and not code_str.lower().startswith("type:"):
+            other_codes.append(code_str)
+        elif code_str and code_str.lower() not in ["type: value", "type:value"]:
+            other_codes.append(code_str)
+    key_requirements_summary = data.get("key_requirements_summary", "")
+    if isinstance(key_requirements_summary, list):
+        key_requirements_summary = "\n".join(str(item) for item in key_requirements_summary)
+    elif not isinstance(key_requirements_summary, str):
+        key_requirements_summary = str(key_requirements_summary) if key_requirements_summary else ""
+    raw_structured = data.get("metadata", {}) or {}
+    if raw_structured:
+        logger.warning("Extraction agent: metadata field found and will be ignored. Do not include metadata in extraction results.")
+        raw_structured = {}
     result = ExtractionResult(
         translated_text="",
         language=data.get("language", "en"),
         cpv_codes=cpv_codes,
         other_codes=other_codes,
-        key_requirements_summary=data.get("key_requirements_summary", ""),
-        raw_structured=data.get("metadata", {}) or {},
+        key_requirements_summary=key_requirements_summary,
+        raw_structured=raw_structured,
     )
     logger.info(
         "Extraction agent: finished (lang=%s, cpv=%d, other_codes=%d)",
@@ -204,7 +170,6 @@ def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
         len(result.other_codes),
     )
     return result
-
 
 def run_extraction_agent(document_text: str) -> ExtractionResult:
     cache_info = _run_extraction_agent_cached.cache_info()
@@ -218,7 +183,6 @@ def run_extraction_agent(document_text: str) -> ExtractionResult:
     )
 
     result = _run_extraction_agent_cached(document_text)
-
     new_cache_info = _run_extraction_agent_cached.cache_info()
     if new_cache_info.hits > cache_info.hits:
         logger.info("Extraction agent: cache HIT - returned cached result")

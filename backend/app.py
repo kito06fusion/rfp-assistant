@@ -110,7 +110,6 @@ async def process_rfp(file: UploadFile = File(...)) -> Dict[str, Any]:
         len(extraction_res.cpv_codes),
         len(extraction_res.other_codes),
     )
-
     try:
         scope_res = run_scope_agent(translated_text=text)
     except Exception as exc:
@@ -122,16 +121,16 @@ async def process_rfp(file: UploadFile = File(...)) -> Dict[str, Any]:
             status_code=500,
             detail=f"Scope agent failed for request {request_id}. Check server logs.",
         ) from exc
-
     elapsed = time.time() - t0
     logger.info(
-        "REQUEST %s: scope agent finished (removed_chars=%d, cleaned_chars=%d)",
+        "REQUEST %s: scope agent finished (necessary_chars=%d, removed_chars=%d, cleaned_chars=%d, comparison_agreement=%s)",
         request_id,
+        len(scope_res.necessary_text or ""),
         len(scope_res.removed_text or ""),
         len(scope_res.cleaned_text or ""),
+        scope_res.comparison_agreement,
     )
     logger.info("REQUEST %s: extraction + scope completed in %.2fs", request_id, elapsed)
-
     response: Dict[str, Any] = {
         "extraction": extraction_res.to_dict(),
         "scope": scope_res.to_dict(),
@@ -141,10 +140,8 @@ async def process_rfp(file: UploadFile = File(...)) -> Dict[str, Any]:
     response["extraction"]["ocr_text"] = text
     return response
 
-
 class RequirementsRequest(BaseModel):
     essential_text: str
-
 
 @app.post("/run-requirements")
 async def run_requirements(req: RequirementsRequest) -> Dict[str, Any]:
@@ -165,7 +162,6 @@ async def run_requirements(req: RequirementsRequest) -> Dict[str, Any]:
         len(result.response_structure_requirements),
     )
     return result.to_dict()
-
 
 @app.get("/health")
 async def health() -> Dict[str, Any]:

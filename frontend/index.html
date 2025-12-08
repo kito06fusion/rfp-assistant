@@ -217,10 +217,9 @@
           <div id="tab-ocr" class="tab-panel active">
             <div class="agent-header">
               <h2>1. Raw OCR Text</h2>
-              <span class="pill">Qwen/Qwen2.5-VL-7B-Instruct</span>
             </div>
             <div class="agent-summary">
-              <strong>Description:</strong> Full text extracted by Qwen from the original PDF/DOCX (all pages, no filtering).
+              <strong>Description:</strong> Full text extracted from the original PDF/DOCX. Uses direct extraction (pdfplumber/python-docx) when possible, falls back to Qwen vision model for scanned/image-based documents.
             </div>
             <pre id="ocr-output">Waiting for OCR…</pre>
           </div>
@@ -312,39 +311,39 @@
       function formatExtractionOutput(extraction) {
         if (!extraction) return "No extraction data available.";
         
-        let output = "📋 EXTRACTION RESULTS\n";
+        let output = "EXTRACTION RESULTS\n";
         output += "=".repeat(60) + "\n\n";
         
-        output += "🌐 Language: " + (extraction.language || "Unknown") + "\n\n";
+        output += "Language: " + (extraction.language || "Unknown") + "\n\n";
         
         if (extraction.cpv_codes && extraction.cpv_codes.length > 0) {
-          output += "🏷️  CPV Codes (" + extraction.cpv_codes.length + "):\n";
+          output += "CPV Codes (" + extraction.cpv_codes.length + "):\n";
           extraction.cpv_codes.forEach((code, idx) => {
             output += "   " + (idx + 1) + ". " + code + "\n";
           });
           output += "\n";
         } else {
-          output += "🏷️  CPV Codes: None found\n\n";
+          output += "CPV Codes: None found\n\n";
         }
         
         if (extraction.other_codes && extraction.other_codes.length > 0) {
-          output += "🔖 Other Codes (" + extraction.other_codes.length + "):\n";
+          output += "Other Codes (" + extraction.other_codes.length + "):\n";
           extraction.other_codes.forEach((code, idx) => {
             output += "   " + (idx + 1) + ". " + code + "\n";
           });
           output += "\n";
         } else {
-          output += "🔖 Other Codes: None found\n\n";
+          output += "Other Codes: None found\n\n";
         }
         
         if (extraction.key_requirements_summary) {
-          output += "📝 Key Requirements Summary:\n";
+          output += "Key Requirements Summary:\n";
           output += "-".repeat(60) + "\n";
           output += extraction.key_requirements_summary + "\n\n";
         }
         
         if (extraction.raw_structured && Object.keys(extraction.raw_structured).length > 0) {
-          output += "📊 Additional Metadata:\n";
+          output += "Additional Metadata:\n";
           output += "-".repeat(60) + "\n";
           for (const [key, value] of Object.entries(extraction.raw_structured)) {
             output += key + ": " + JSON.stringify(value) + "\n";
@@ -357,33 +356,45 @@
       function formatScopeOutput(scope) {
         if (!scope) return "No scope data available.";
         
-        let output = "🎯 SCOPE ANALYSIS\n";
+        let output = "SCOPE ANALYSIS\n";
         output += "=".repeat(60) + "\n\n";
         
         if (scope.rationale) {
-          output += "💭 Rationale:\n";
+          output += "Rationale:\n";
           output += "-".repeat(60) + "\n";
           output += scope.rationale + "\n\n";
         }
         
         if (scope.removed_text && scope.removed_text.trim().length > 0) {
-          output += "❌ TEXT IDENTIFIED FOR REMOVAL\n";
+          output += "REMOVED TEXT (Out of Scope)\n";
           output += "-".repeat(60) + "\n";
-          const removed = scope.removed_text.length > 2000
-            ? scope.removed_text.substring(0, 2000) + "\n\n[... truncated, showing first 2000 characters ...]"
-            : scope.removed_text;
-          output += removed + "\n\n";
+          output += scope.removed_text + "\n\n";
         } else {
-          output += "❌ TEXT IDENTIFIED FOR REMOVAL: None\n\n";
+          output += "REMOVED TEXT: None\n\n";
         }
         
-        output += "✅ CLEANED TEXT (After Removal)\n";
+        if (scope.necessary_text && scope.necessary_text.trim().length > 0) {
+          output += "NECESSARY TEXT (Extracted)\n";
+          output += "-".repeat(60) + "\n";
+          output += scope.necessary_text + "\n\n";
+        } else {
+          output += "NECESSARY TEXT: None\n\n";
+        }
+        
+        if (scope.comparison_agreement !== undefined) {
+          output += "COMPARISON VALIDATION\n";
+          output += "-".repeat(60) + "\n";
+          output += "Agreement: " + (scope.comparison_agreement ? "Yes" : "No") + "\n";
+          if (scope.comparison_notes) {
+            output += "Notes: " + scope.comparison_notes + "\n";
+          }
+          output += "\n";
+        }
+        
+        output += "CLEANED TEXT (Same as Necessary Text)\n";
         output += "-".repeat(60) + "\n";
         if (scope.cleaned_text) {
-          const cleaned = scope.cleaned_text.length > 3000 
-            ? scope.cleaned_text.substring(0, 3000) + "\n\n[... truncated, showing first 3000 characters ...]"
-            : scope.cleaned_text;
-          output += cleaned + "\n\n";
+          output += scope.cleaned_text + "\n\n";
         } else {
           output += "No cleaned text available.\n\n";
         }
@@ -394,51 +405,31 @@
       function formatRequirementsOutput(requirements) {
         if (!requirements) return "No requirements data available.";
         
-        let output = "📋 REQUIREMENTS ANALYSIS\n";
+        let output = "REQUIREMENTS ANALYSIS\n";
         output += "=".repeat(60) + "\n\n";
         
-        if (requirements.notes) {
-          output += "📝 Notes:\n";
-          output += "-".repeat(60) + "\n";
-          output += requirements.notes + "\n\n";
-        }
-        
         if (requirements.solution_requirements && requirements.solution_requirements.length > 0) {
-          output += "💡 SOLUTION REQUIREMENTS (" + requirements.solution_requirements.length + ")\n";
+          output += "SOLUTION REQUIREMENTS (" + requirements.solution_requirements.length + ")\n";
           output += "=".repeat(60) + "\n\n";
           requirements.solution_requirements.forEach((req, idx) => {
-            output += "[" + (idx + 1) + "] " + req.id + " - " + req.category + "\n";
-            output += "Type: " + req.type + "\n";
-            output += "Normalized: " + req.normalized_text + "\n";
-            output += "Source Text:\n";
-            output += "-".repeat(50) + "\n";
-            const sourceText = req.source_text.length > 500
-              ? req.source_text.substring(0, 500) + "\n[... truncated ...]"
-              : req.source_text;
-            output += sourceText + "\n";
-            output += "\n";
+            output += "[" + (idx + 1) + "] Type: " + req.type + "\n";
+            output += "-".repeat(60) + "\n";
+            output += req.source_text + "\n\n";
           });
         } else {
-          output += "💡 SOLUTION REQUIREMENTS: None found\n\n";
+          output += "SOLUTION REQUIREMENTS: None found\n\n";
         }
         
         if (requirements.response_structure_requirements && requirements.response_structure_requirements.length > 0) {
-          output += "📄 RESPONSE STRUCTURE REQUIREMENTS (" + requirements.response_structure_requirements.length + ")\n";
+          output += "RESPONSE STRUCTURE REQUIREMENTS (" + requirements.response_structure_requirements.length + ")\n";
           output += "=".repeat(60) + "\n\n";
           requirements.response_structure_requirements.forEach((req, idx) => {
-            output += "[" + (idx + 1) + "] " + req.id + " - " + req.category + "\n";
-            output += "Type: " + req.type + "\n";
-            output += "Normalized: " + req.normalized_text + "\n";
-            output += "Source Text:\n";
-            output += "-".repeat(50) + "\n";
-            const sourceText = req.source_text.length > 500
-              ? req.source_text.substring(0, 500) + "\n[... truncated ...]"
-              : req.source_text;
-            output += sourceText + "\n";
-            output += "\n";
+            output += "[" + (idx + 1) + "] Type: " + req.type + "\n";
+            output += "-".repeat(60) + "\n";
+            output += req.source_text + "\n\n";
           });
         } else {
-          output += "📄 RESPONSE STRUCTURE REQUIREMENTS: None found\n\n";
+          output += "RESPONSE STRUCTURE REQUIREMENTS: None found\n\n";
         }
         
         return output;
@@ -533,7 +524,7 @@
 
           updateAgentStatus("scope", "complete", scopePill, scopeStatus);
           scopeOutput.textContent = formatScopeOutput(data.scope);
-          const scopeSummary = `Removed: ${data.scope?.removed_text?.length || 0} chars, Cleaned: ${data.scope?.cleaned_text?.length || 0} chars`;
+          const scopeSummary = `Necessary: ${data.scope?.necessary_text?.length || 0} chars, Comparison: ${data.scope?.comparison_agreement !== undefined ? (data.scope.comparison_agreement ? 'Agreed' : 'Disagreed') : 'N/A'}`;
           document.getElementById("scope-summary").innerHTML = `<strong>Status:</strong> Complete<br><strong>Summary:</strong> ${scopeSummary}`;
 
           updateAgentStatus("requirements", "waiting", reqPill, reqStatus);

@@ -5,6 +5,8 @@ import io
 import logging
 from pathlib import Path
 from typing import List, Union
+import tempfile
+
 
 from PIL import Image  # type: ignore
 
@@ -17,7 +19,6 @@ PathLike = Union[str, Path]
 
 TEXT_EXTRACTION_MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
 
-# Minimum text length to consider direct extraction successful
 MIN_TEXT_LENGTH = 100
 
 
@@ -37,7 +38,6 @@ def _pdf_to_images(pdf_path: Path) -> List[Image.Image]:
     logger.info("[Vision OCR Fallback] Converted PDF to %d page image(s)", len(images))
     return images
 
-
 def _docx_to_images(docx_path: Path) -> List[Image.Image]:
     try:
         from docx2pdf import convert  # type: ignore
@@ -48,8 +48,6 @@ def _docx_to_images(docx_path: Path) -> List[Image.Image]:
             "Install with: pip install docx2pdf pdf2image. "
             "You may also need poppler-utils: brew install poppler (macOS) or apt-get install poppler-utils (Linux)"
         )
-
-    import tempfile
 
     logger.info("[Vision OCR Fallback] Converting DOCX to images: %s", docx_path.name)
     logger.info("[Vision OCR Fallback] Step 1: Converting DOCX to PDF...")
@@ -68,21 +66,17 @@ def _docx_to_images(docx_path: Path) -> List[Image.Image]:
             except Exception:
                 pass
 
-
 def _image_to_base64(image: Image.Image) -> str:
     buffered = io.BytesIO()
     image.save(buffered, format="PNG")
     img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{img_base64}"
 
-
 def _extract_text_from_images(images: List[Image.Image]) -> str:
     logger.info("[Vision OCR] Starting OCR extraction from %d image(s) using model: %s", 
                len(images), TEXT_EXTRACTION_MODEL)
     logger.info("[Vision OCR] This may take a while depending on document size...")
-
     all_text_parts: List[str] = []
-
     for idx, image in enumerate(images, 1):
         logger.info("[Vision OCR] Processing page %d/%d...", idx, len(images))
         img_base64 = _image_to_base64(image)
@@ -119,33 +113,24 @@ def _extract_text_from_images(images: List[Image.Image]) -> str:
 
         all_text_parts.append(page_text)
         logger.info("[Vision OCR] Page %d/%d: extracted %d characters", idx, len(images), len(page_text))
-
     full_text = "\n\n--- Page Break ---\n\n".join(all_text_parts)
     logger.info("[Vision OCR] OCR extraction completed: %d total characters from %d page(s)", 
                len(full_text), len(images))
     return full_text
 
-
 def _extract_text_from_pdf_direct(pdf_path: Path) -> str:
-    """
-    Try to extract text directly from PDF using pdfplumber.
-    Returns empty string if extraction fails or PDF has no embedded text.
-    """
     try:
         import pdfplumber  # type: ignore
     except ImportError:
         logger.warning("[PDF Direct Extraction] pdfplumber library not available, skipping direct extraction")
         return ""
-
     try:
         logger.info("[PDF Direct Extraction] Starting direct text extraction from PDF: %s", pdf_path.name)
         text_parts: List[str] = []
-        total_pages = 0
-        
+        total_pages = 0       
         with pdfplumber.open(str(pdf_path)) as pdf:
             total_pages = len(pdf.pages)
-            logger.info("[PDF Direct Extraction] PDF has %d page(s)", total_pages)
-            
+            logger.info("[PDF Direct Extraction] PDF has %d page(s)", total_pages)          
             for page_num, page in enumerate(pdf.pages, 1):
                 page_text = page.extract_text()
                 if page_text:
@@ -154,8 +139,7 @@ def _extract_text_from_pdf_direct(pdf_path: Path) -> str:
                                page_num, total_pages, len(page_text))
                 else:
                     logger.warning("[PDF Direct Extraction] Page %d/%d: no text found (may be image-only)", 
-                                 page_num, total_pages)
-        
+                                 page_num, total_pages)   
         full_text = "\n\n--- Page Break ---\n\n".join(text_parts)
         pages_with_text = len(text_parts)
         logger.info("[PDF Direct Extraction] Completed: %d characters from %d/%d pages with text", 
@@ -167,34 +151,24 @@ def _extract_text_from_pdf_direct(pdf_path: Path) -> str:
 
 
 def _extract_text_from_docx_direct(docx_path: Path) -> str:
-    """
-    Try to extract text directly from DOCX using python-docx.
-    Returns empty string if extraction fails.
-    """
     try:
         from docx import Document  # type: ignore
     except ImportError:
         logger.warning("[DOCX Direct Extraction] python-docx library not available, skipping direct extraction")
         return ""
-
     try:
         logger.info("[DOCX Direct Extraction] Starting direct text extraction from DOCX: %s", docx_path.name)
-        doc = Document(str(docx_path))
-        
+        doc = Document(str(docx_path))     
         text_parts: List[str] = []
         para_count = 0
-        table_count = 0
-        
+        table_count = 0     
         logger.info("[DOCX Direct Extraction] Extracting paragraphs...")
         for para in doc.paragraphs:
             if para.text.strip():
                 text_parts.append(para.text)
-                para_count += 1
-        
+                para_count += 1     
         logger.info("[DOCX Direct Extraction] Found %d paragraphs with text", para_count)
         logger.info("[DOCX Direct Extraction] Extracting tables...")
-        
-        # Also extract text from tables
         for table_idx, table in enumerate(doc.tables, 1):
             table_text_parts: List[str] = []
             for row in table.rows:
@@ -205,7 +179,6 @@ def _extract_text_from_docx_direct(docx_path: Path) -> str:
                 text_parts.append("\n".join(table_text_parts))
                 table_count += 1
                 logger.info("[DOCX Direct Extraction] Table %d: extracted %d rows", table_idx, len(table_text_parts))
-        
         full_text = "\n\n".join(text_parts)
         logger.info("[DOCX Direct Extraction] Completed: %d characters from %d paragraphs and %d tables", 
                    len(full_text), para_count, table_count)
@@ -216,29 +189,19 @@ def _extract_text_from_docx_direct(docx_path: Path) -> str:
 
 
 def extract_text_from_file(path: PathLike) -> str:
-    """
-    Extract text from PDF or DOCX file.
-    First tries direct extraction (pdfplumber for PDFs, python-docx for DOCX).
-    Falls back to vision model OCR if direct extraction fails or returns too little text.
-    """
     p = Path(path)
     suffix = p.suffix.lower()
-    
     logger.info("=" * 80)
     logger.info("[Text Extraction] Starting text extraction from file: %s", p.name)
     logger.info("[Text Extraction] File type: %s", suffix.upper())
     logger.info("=" * 80)
-
-    # Try direct extraction first
     direct_text = ""
     extraction_method = ""
-    
     if suffix == ".pdf":
         logger.info("[Text Extraction] Attempting direct PDF extraction (pdfplumber)...")
         direct_text = _extract_text_from_pdf_direct(p)
         extraction_method = "pdfplumber"
     elif suffix in {".docx", ".doc"}:
-        # For .doc files, we can't use python-docx directly, so skip direct extraction
         if suffix == ".docx":
             logger.info("[Text Extraction] Attempting direct DOCX extraction (python-docx)...")
             direct_text = _extract_text_from_docx_direct(p)
@@ -247,10 +210,7 @@ def extract_text_from_file(path: PathLike) -> str:
             logger.info("[Text Extraction] .doc files not supported for direct extraction, skipping to OCR")
     else:
         raise ValueError(f"Unsupported file type for path: {path}")
-
-    # Check if direct extraction was successful
     direct_text_length = len(direct_text.strip()) if direct_text else 0
-    
     if direct_text and direct_text_length >= MIN_TEXT_LENGTH:
         logger.info("=" * 80)
         logger.info("[Text Extraction] ✓ SUCCESS: Direct extraction successful!")
@@ -259,8 +219,6 @@ def extract_text_from_file(path: PathLike) -> str:
         logger.info("[Text Extraction] Using direct extraction result (no OCR needed)")
         logger.info("=" * 80)
         return direct_text
-
-    # Fall back to vision model OCR
     logger.info("=" * 80)
     if direct_text:
         logger.warning(
@@ -273,8 +231,6 @@ def extract_text_from_file(path: PathLike) -> str:
         logger.warning("[Text Extraction] Direct extraction failed or returned no text.")
         logger.warning("[Text Extraction] Falling back to vision model OCR (this will take longer)...")
     logger.info("=" * 80)
-
-    # Use vision model as fallback
     logger.info("[Text Extraction] Preparing document for OCR...")
     if suffix == ".pdf":
         images = _pdf_to_images(p)
@@ -282,7 +238,6 @@ def extract_text_from_file(path: PathLike) -> str:
         images = _docx_to_images(p)
     else:
         raise ValueError(f"Unsupported file type for path: {path}")
-
     if not images:
         logger.error("[Text Extraction] ✗ ERROR: No images generated from file: %s", path)
         logger.warning("[Text Extraction] Returning any text from direct extraction (if available)")
@@ -290,15 +245,12 @@ def extract_text_from_file(path: PathLike) -> str:
         result = direct_text if direct_text else ""
         logger.info("[Text Extraction] Final result: %d characters", len(result))
         return result
-
     ocr_text = _extract_text_from_images(images)
-    
     logger.info("=" * 80)
     logger.info("[Text Extraction] ✓ COMPLETED: OCR extraction finished")
     logger.info("[Text Extraction] Method: Vision model OCR (%s)", TEXT_EXTRACTION_MODEL)
     logger.info("[Text Extraction] Extracted: %d characters from %d page(s)", len(ocr_text), len(images))
     logger.info("=" * 80)
-    
     return ocr_text
 
 
