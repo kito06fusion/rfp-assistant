@@ -516,7 +516,7 @@ async def _generate_structured_response(
             qa_context=qa_context,
         )
         
-        # Convert structured response to individual_responses format for PDF generation
+        # Convert structured response to individual_responses format for document generation
         # Split by sections if possible, or create single response
         individual_responses = [{
             "requirement_id": "STRUCTURED",
@@ -529,39 +529,44 @@ async def _generate_structured_response(
         total_elapsed = time.time() - start_time
         logger.info("Structured response generated in %.2f seconds (length=%d chars)", total_elapsed, len(result.response_text))
         
-        # Generate PDF
-        from backend.document_formatter import generate_rfp_pdf
+        # Generate Word (DOCX) document instead of PDF for editable output
+        from backend.document_formatter import generate_rfp_docx
+        if not generate_rfp_docx:
+            logger.error("DOCX generation not available. Install python-docx to enable Word export.")
+            raise HTTPException(
+                status_code=500,
+                detail="DOCX generation not available. Install python-docx to enable Word export.",
+            )
         
         rfp_title = f"RFP Response (Structured)"
         if extraction_result.key_requirements_summary:
             rfp_title = f"RFP Response (Structured) - {extraction_result.key_requirements_summary[:50]}..."
         
         project_root = Path(__file__).parent.parent
-        output_dir = project_root / "output" / "pdfs"
+        output_dir = project_root / "output" / "docx"
         output_dir.mkdir(parents=True, exist_ok=True)
         
         timestamp = int(time.time())
-        pdf_filename = f"rfp_response_structured_{extraction_result.language}_{timestamp}.pdf"
-        pdf_path = output_dir / pdf_filename
+        docx_filename = f"rfp_response_structured_{extraction_result.language}_{timestamp}.docx"
+        docx_path = output_dir / docx_filename
         
-        pdf_bytes = generate_rfp_pdf(
+        docx_bytes = generate_rfp_docx(
             individual_responses=individual_responses,
             requirements_result=requirements_result,
             extraction_result=extraction_result,
             rfp_title=rfp_title,
-            output_path=pdf_path,
+            output_path=docx_path,
         )
         
-        pdf_bytes = pdf_path.read_bytes()
-        logger.info("PDF generated successfully: %d bytes", len(pdf_bytes))
+        docx_bytes = docx_path.read_bytes()
+        logger.info("DOCX generated successfully: %d bytes", len(docx_bytes))
         
         return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
+            content=docx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={
-                "Content-Disposition": f'attachment; filename="{pdf_filename}"',
-                "Content-Length": str(len(pdf_bytes)),
-                "X-PDF-Path": str(pdf_path.absolute()),
+                "Content-Disposition": f'attachment; filename="{docx_filename}"',
+                "Content-Length": str(len(docx_bytes)),
             }
         )
     except Exception as exc:
@@ -821,72 +826,73 @@ async def _generate_per_requirement_response(
             "=" * 80
         )
         
-        # Always generate PDF
-        logger.info("Generating PDF document...")
+        # Always generate an editable Word (DOCX) document
+        logger.info("Generating DOCX document...")
         try:
-            from backend.document_formatter import generate_rfp_pdf
+            from backend.document_formatter import generate_rfp_docx
+            if not generate_rfp_docx:
+                raise ImportError("DOCX generation not available. Install python-docx.")
             
             rfp_title = f"RFP Response"
             if extraction_result.key_requirements_summary:
                 rfp_title = f"RFP Response - {extraction_result.key_requirements_summary[:50]}..."
             
-            logger.info("Generating PDF with %d individual responses", len(individual_responses))
-            pdf_start_time = time.time()
+            logger.info("Generating DOCX with %d individual responses", len(individual_responses))
+            docx_start_time = time.time()
             
             project_root = Path(__file__).parent.parent
-            output_dir = project_root / "output" / "pdfs"
+            output_dir = project_root / "output" / "docx"
             output_dir.mkdir(parents=True, exist_ok=True)
-            logger.info("PDF output directory: %s (absolute: %s)", output_dir, output_dir.absolute())
+            logger.info("DOCX output directory: %s (absolute: %s)", output_dir, output_dir.absolute())
             
             timestamp = int(time.time())
-            pdf_filename = f"rfp_response_{extraction_result.language}_{timestamp}.pdf"
-            pdf_path = output_dir / pdf_filename
-            logger.info("PDF will be saved to: %s", pdf_path.absolute())
+            docx_filename = f"rfp_response_{extraction_result.language}_{timestamp}.docx"
+            docx_path = output_dir / docx_filename
+            logger.info("DOCX will be saved to: %s", docx_path.absolute())
             
-            pdf_bytes = generate_rfp_pdf(
+            docx_bytes = generate_rfp_docx(
                 individual_responses=individual_responses,
                 requirements_result=requirements_result,
                 extraction_result=extraction_result,
                 rfp_title=rfp_title,
-                output_path=pdf_path,
+                output_path=docx_path,
             )
             
-            pdf_bytes = pdf_path.read_bytes()
+            docx_bytes = docx_path.read_bytes()
             
-            pdf_elapsed = time.time() - pdf_start_time
-            pdf_absolute_path = pdf_path.absolute()
+            docx_elapsed = time.time() - docx_start_time
+            docx_absolute_path = docx_path.absolute()
             logger.info(
-                "PDF generation completed successfully: %d bytes in %.2f seconds, saved to %s",
-                len(pdf_bytes),
-                pdf_elapsed,
-                pdf_absolute_path,
+                "DOCX generation completed successfully: %d bytes in %.2f seconds, saved to %s",
+                len(docx_bytes),
+                docx_elapsed,
+                docx_absolute_path,
             )
             
-            if not pdf_path.exists():
-                logger.error("PDF file was not found after generation at: %s", pdf_absolute_path)
-                raise FileNotFoundError(f"PDF was not saved to {pdf_absolute_path}")
+            if not docx_path.exists():
+                logger.error("DOCX file was not found after generation at: %s", docx_absolute_path)
+                raise FileNotFoundError(f"DOCX was not saved to {docx_absolute_path}")
             
             return Response(
-                content=pdf_bytes,
-                media_type="application/pdf",
+                content=docx_bytes,
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 headers={
-                    "Content-Disposition": f'attachment; filename="{pdf_filename}"',
-                    "Content-Length": str(len(pdf_bytes)),
-                    "X-PDF-Path": str(pdf_absolute_path),
+                    "Content-Disposition": f'attachment; filename="{docx_filename}"',
+                    "Content-Length": str(len(docx_bytes)),
                 }
             )
         except ImportError as import_exc:
-            logger.error("WeasyPrint not available: %s", import_exc)
+            logger.error("DOCX generation not available: %s", import_exc)
             raise HTTPException(
                 status_code=500,
-                detail="PDF generation not available. WeasyPrint dependencies are missing. Check server logs.",
+                detail="DOCX generation not available. python-docx dependency is missing. Check server logs.",
             ) from import_exc
-        except Exception as pdf_exc:
-            logger.exception("PDF generation failed: %s", pdf_exc)
+        except Exception as docx_exc:
+            logger.exception("DOCX generation failed: %s", docx_exc)
             raise HTTPException(
                 status_code=500,
-                detail=f"PDF generation failed: {str(pdf_exc)}",
-            ) from pdf_exc
+                detail=f"DOCX generation failed: {str(docx_exc)}",
+            ) from docx_exc
     except KeyboardInterrupt:
         logger.warning("Response generation interrupted by user")
         partial_completion = True
@@ -959,72 +965,73 @@ async def _generate_per_requirement_response(
     logger.info("  Combined response length: %d characters", len(combined_response))
     logger.info("=" * 80)
     
-    # Generate PDF
-    logger.info("Generating PDF document...")
+    # Generate Word (DOCX) document for editable output
+    logger.info("Generating DOCX document...")
     try:
-        from backend.document_formatter import generate_rfp_pdf
-        
+        from backend.document_formatter import generate_rfp_docx
+        if not generate_rfp_docx:
+            raise ImportError("DOCX generation not available. Install python-docx.")
+
         rfp_title = f"RFP Response"
         if extraction_result.key_requirements_summary:
             rfp_title = f"RFP Response - {extraction_result.key_requirements_summary[:50]}..."
         
-        logger.info("Generating PDF with %d individual responses", len(individual_responses))
-        pdf_start_time = time.time()
+        logger.info("Generating DOCX with %d individual responses", len(individual_responses))
+        docx_start_time = time.time()
         
         project_root = Path(__file__).parent.parent
-        output_dir = project_root / "output" / "pdfs"
+        output_dir = project_root / "output" / "docx"
         output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("PDF output directory: %s (absolute: %s)", output_dir, output_dir.absolute())
+        logger.info("DOCX output directory: %s (absolute: %s)", output_dir, output_dir.absolute())
         
         timestamp = int(time.time())
-        pdf_filename = f"rfp_response_{extraction_result.language}_{timestamp}.pdf"
-        pdf_path = output_dir / pdf_filename
-        logger.info("PDF will be saved to: %s", pdf_path.absolute())
+        docx_filename = f"rfp_response_{extraction_result.language}_{timestamp}.docx"
+        docx_path = output_dir / docx_filename
+        logger.info("DOCX will be saved to: %s", docx_path.absolute())
         
-        pdf_bytes = generate_rfp_pdf(
+        docx_bytes = generate_rfp_docx(
             individual_responses=individual_responses,
             requirements_result=requirements_result,
             extraction_result=extraction_result,
             rfp_title=rfp_title,
-            output_path=pdf_path,
+            output_path=docx_path,
         )
         
-        pdf_bytes = pdf_path.read_bytes()
+        docx_bytes = docx_path.read_bytes()
         
-        pdf_elapsed = time.time() - pdf_start_time
-        pdf_absolute_path = pdf_path.absolute()
+        docx_elapsed = time.time() - docx_start_time
+        docx_absolute_path = docx_path.absolute()
         logger.info(
-            "PDF generation completed successfully: %d bytes in %.2f seconds, saved to %s",
-            len(pdf_bytes),
-            pdf_elapsed,
-            pdf_absolute_path,
+            "DOCX generation completed successfully: %d bytes in %.2f seconds, saved to %s",
+            len(docx_bytes),
+            docx_elapsed,
+            docx_absolute_path,
         )
         
-        if not pdf_path.exists():
-            logger.error("PDF file was not found after generation at: %s", pdf_absolute_path)
-            raise FileNotFoundError(f"PDF was not saved to {pdf_absolute_path}")
+        if not docx_path.exists():
+            logger.error("DOCX file was not found after generation at: %s", docx_absolute_path)
+            raise FileNotFoundError(f"DOCX was not saved to {docx_absolute_path}")
         
         return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
+            content=docx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={
-                "Content-Disposition": f'attachment; filename="{pdf_filename}"',
-                "Content-Length": str(len(pdf_bytes)),
-                "X-PDF-Path": str(pdf_absolute_path),
+                "Content-Disposition": f'attachment; filename="{docx_filename}"',
+                "Content-Length": str(len(docx_bytes)),
             }
         )
     except ImportError as import_exc:
-        logger.error("WeasyPrint not available: %s", import_exc)
+        logger.error("DOCX generation not available: %s", import_exc)
         raise HTTPException(
             status_code=500,
-            detail="PDF generation not available. WeasyPrint dependencies are missing. Check server logs.",
+            detail="DOCX generation not available. python-docx dependency is missing. Check server logs.",
         ) from import_exc
-    except Exception as pdf_exc:
-        logger.exception("PDF generation failed: %s", pdf_exc)
+    except Exception as docx_exc:
+        logger.exception("DOCX generation failed: %s", docx_exc)
         raise HTTPException(
             status_code=500,
-            detail=f"PDF generation failed: {str(pdf_exc)}",
-        ) from pdf_exc
+            detail=f"DOCX generation failed: {str(docx_exc)}",
+        ) from docx_exc
         raise HTTPException(
             status_code=500,
             detail=f"Response generation failed. Check server logs. Error: {str(exc)}",
