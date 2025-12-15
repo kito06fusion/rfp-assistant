@@ -1,0 +1,103 @@
+.chat-panel {
+  background: radial-gradient(circle at top left, #020617, #020617 40%, #020617);
+  border-radius: 0.75rem;
+  border: 2px solid rgba(37, 99, 235, 0.3);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.85), 0 0 20px rgba(37, 99, 235, 0.1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+}
+
+.chat-panel-empty {
+  border-color: rgba(148, 163, 184, 0.2);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.85);
+}
+
+.chat-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.chat-panel-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #e5e7eb;
+  font-weight: 600;
+}
+
+.chat-panel-toggle {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  transition: background 0.2s, color 0.2s;
+}
+
+.chat-panel-toggle:hover {
+  background: rgba(148, 163, 184, 0.1);
+  color: #e5e7eb;
+}
+
+.chat-panel-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-panel-empty-content {
+  padding: 2rem 1.5rem;
+  text-align: center;
+  color: #6b7280;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.chat-panel-empty-content p {
+  margin: 0.5rem 0;
+  line-height: 1.6;
+}
+
+.chat-panel-hint {
+  font-size: 0.9rem;
+  color: #9ca3af;
+  font-style: italic;
+  margin-top: 1rem !important;
+}
+
+.chat-panel-minimized {
+  height: auto;
+}
+
+.chat-panel-minimized .chat-panel-content {
+  display: none;
+}
+
+/* Override ChatInterface styles when in panel */
+.chat-panel .chat-interface {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  max-height: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-panel .chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+

@@ -46,7 +46,6 @@ def run_rfp_pipeline(rfp_text: str, request_id: Optional[str] = None) -> RFPPipe
         scope_res.comparison_agreement,
     )
 
-    # NOTE (human-in-the-loop):
 
     logger.info("REQUEST %s: step 3/3 – requirements agent", rid)
     requirements_res = run_requirements_agent(

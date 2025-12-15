@@ -1,0 +1,20 @@
+.action-button {
+  background: #2563eb;
+  border: none;
+  color: white;
+  padding: 0.6rem 1.2rem;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: background 0.2s;
+}
+
+.action-button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.action-button[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+

@@ -1,0 +1,10 @@
+.accept-row input[type="checkbox"] {
+  accent-color: #22c55e;
+  cursor: pointer;
+}
+
+.accept-row label {
+  cursor: pointer;
+  user-select: none;
+}
+

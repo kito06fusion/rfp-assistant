@@ -1,0 +1,30 @@
+.pill {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  color: #e5e7eb;
+  background: radial-gradient(circle at top left, #0b1220, #020617);
+}
+
+.pill-processing {
+  border-color: #f59e0b;
+  color: #fbbf24;
+  animation: pulse 2s infinite;
+}
+
+.pill-complete {
+  border-color: #16a34a;
+  color: #bbf7d0;
+}
+
+.pill-error {
+  border-color: #dc2626;
+  color: #fca5a5;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+

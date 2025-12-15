@@ -1,0 +1,545 @@
+/* Document Styles - Matching NIIT PDF Layout */
+
+@page {
+    size: letter;
+    margin: 0.75in;
+    @top-center {
+        content: "";
+    }
+    @bottom-center {
+        content: counter(page);
+        font-size: 9pt;
+        color: #666666;
+        font-family: "Calibri", "Arial", sans-serif;
+    }
+}
+
+/* Base Typography - Matching NIIT PDF fonts */
+body {
+    font-family: "Calibri", "Arial", sans-serif;
+    font-size: 11pt;
+    line-height: 1.5;
+    color: #333333;
+    margin: 0;
+    padding: 0;
+}
+
+/* Headings - Using Arial-Black style for major headings */
+h1 {
+    font-family: "Arial Black", "Arial", sans-serif;
+    font-weight: 900;
+    color: #1a5490;
+    margin-top: 0;
+    margin-bottom: 0.75em;
+    letter-spacing: -0.5px;
+}
+
+h2 {
+    font-family: "Arial Black", "Arial", sans-serif;
+    font-weight: 900;
+    color: #1a5490;
+    font-size: 14pt;
+    margin-top: 1.25em;
+    margin-bottom: 0.75em;
+    letter-spacing: -0.3px;
+}
+
+h3 {
+    font-family: "Arial", sans-serif;
+    font-weight: bold;
+    color: #333333;
+    font-size: 12pt;
+    margin-top: 0.75em;
+    margin-bottom: 0.5em;
+}
+
+/* Cover Page */
+.cover-page {
+    page: cover;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    text-align: center;
+    padding: 2in 1in;
+}
+
+.cover-header {
+    margin-bottom: 2em;
+}
+
+.company-logo {
+    max-width: 200px;
+    max-height: 150px;
+    height: auto;
+    width: auto;
+}
+
+.cover-content {
+    text-align: center;
+}
+
+.cover-title {
+    font-family: "Arial Black", "Arial", sans-serif;
+    font-size: 24pt;
+    font-weight: 900;
+    color: #1a5490;
+    margin-bottom: 0.5em;
+    line-height: 1.2;
+    letter-spacing: -0.5px;
+}
+
+.cover-date {
+    font-size: 12pt;
+    color: #666666;
+    margin-bottom: 2em;
+}
+
+.cover-company {
+    font-family: "Arial Black", "Arial", sans-serif;
+    font-size: 16pt;
+    font-weight: 900;
+    color: #1a5490;
+    margin-bottom: 0.5em;
+    letter-spacing: -0.3px;
+}
+
+.cover-website {
+    font-size: 11pt;
+    color: #666666;
+}
+
+/* Table of Contents Page */
+.toc-page {
+    page: toc;
+    padding: 0;
+}
+
+.toc-content {
+    margin-top: 1em;
+}
+
+.toc-section {
+    margin-bottom: 2em;
+}
+
+.toc-heading {
+    font-family: "Arial Black", "Arial", sans-serif;
+    font-size: 14pt;
+    font-weight: 900;
+    color: #1a5490;
+    margin-bottom: 0.75em;
+    border-bottom: 2px solid #1a5490;
+    padding-bottom: 0.3em;
+    letter-spacing: -0.3px;
+}
+
+.toc-list {
+    list-style: none;
+    padding-left: 0;
+    margin-top: 1em;
+}
+
+.toc-list li {
+    margin-bottom: 0.35em;
+    padding-left: 1em;
+    text-indent: -1em;
+}
+
+.toc-list a {
+    color: #1a5490;
+    text-decoration: none;
+    font-size: 10pt;
+    font-family: "Calibri", "Arial", sans-serif;
+    line-height: 1.4;
+}
+
+.toc-list a:hover {
+    text-decoration: underline;
+}
+
+/* Ensure TOC links work in PDF - WeasyPrint supports anchor links */
+.toc-list a[href^="#"] {
+    color: #1a5490;
+    text-decoration: underline;
+}
+
+/* Ensure requirement sections are properly anchored for TOC links */
+.requirement-response[id] {
+    scroll-margin-top: 0;
+}
+}
+
+/* Company Overview Page */
+.company-overview-page {
+    page: overview;
+    padding: 0;
+}
+
+.company-overview-content {
+    margin-top: 1em;
+}
+
+.company-logo-section {
+    text-align: center;
+    margin-bottom: 1.5em;
+}
+
+.overview-logo {
+    max-width: 150px;
+    max-height: 120px;
+    height: auto;
+    width: auto;
+}
+
+.company-text {
+    font-family: "Calibri", "Arial", sans-serif;
+    text-align: justify;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #333333;
+}
+
+/* Section Titles */
+.section-title {
+    font-family: "Arial Black", "Arial", sans-serif;
+    font-size: 18pt;
+    font-weight: 900;
+    color: #1a5490;
+    margin-bottom: 1em;
+    margin-top: 0;
+    border-bottom: 2px solid #1a5490;
+    padding-bottom: 0.3em;
+    page-break-after: avoid;
+    letter-spacing: -0.5px;
+}
+
+/* Solution Requirements Section */
+.solution-requirements-section {
+    page: content;
+    padding: 0;
+}
+
+/* Requirement Items - Cleaner, more professional */
+.requirement-item,
+.requirement-response {
+    margin-bottom: 2em;
+    page-break-inside: auto;
+    page-break-after: auto;
+    padding: 0;
+    background: transparent;
+    border: none;
+    /* Allow breaking within requirements if needed to avoid blank pages */
+    break-inside: auto;
+    orphans: 2;
+    widows: 2;
+}
+
+.requirement-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3em;
+    margin-bottom: 1em;
+    padding-bottom: 0.5em;
+    border-bottom: 1px solid #1a5490;
+    page-break-after: avoid;
+    break-after: avoid;
+    /* Allow header to break if content is too long */
+    page-break-inside: auto;
+}
+
+.requirement-id {
+    font-family: "Arial", sans-serif;
+    font-weight: bold;
+    font-size: 9pt;
+    color: #666666;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 0.2em;
+}
+
+.requirement-key-phrase {
+    font-family: "Arial", sans-serif;
+    font-size: 12pt;
+    font-weight: bold;
+    color: #1a5490;
+    line-height: 1.4;
+    margin-top: 0;
+}
+
+.requirement-type {
+    font-size: 9pt;
+    padding: 0.25em 0.75em;
+    border-radius: 3px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.requirement-type-mandatory {
+    background-color: #d32f2f;
+    color: white;
+}
+
+.requirement-type-optional {
+    background-color: #f57c00;
+    color: white;
+}
+
+.requirement-type-unspecified {
+    background-color: #757575;
+    color: white;
+}
+
+.requirement-content {
+    margin-top: 0;
+    padding-top: 0;
+    page-break-inside: auto;
+    break-inside: auto;
+}
+
+.requirement-title {
+    font-size: 13pt;
+    font-weight: bold;
+    color: #333333;
+    margin-bottom: 0.75em;
+}
+
+.requirement-source {
+    font-size: 9pt;
+    color: #666666;
+    font-style: italic;
+    margin-top: 0.5em;
+    padding: 0.5em;
+    background-color: #f5f5f5;
+    border-radius: 3px;
+}
+
+.response-content {
+    font-family: "Calibri", "Arial", sans-serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #333333;
+    text-align: justify;
+    margin-top: 0.5em;
+    padding: 0;
+}
+
+/* Format markdown-style headers in responses */
+.response-content h1,
+.response-content h2,
+.response-content h3,
+.response-content h4 {
+    font-family: "Arial", sans-serif;
+    font-weight: bold;
+    color: #1a5490;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+    page-break-after: avoid;
+}
+
+.response-content h2 {
+    font-size: 13pt;
+    border-bottom: 1px solid #1a5490;
+    padding-bottom: 0.2em;
+    margin-top: 1.25em;
+}
+
+.response-content h3 {
+    font-size: 12pt;
+    margin-top: 1em;
+}
+
+.response-content h4 {
+    font-size: 11pt;
+    margin-top: 0.75em;
+}
+
+/* Format lists in responses */
+.response-content ul,
+.response-content ol {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+}
+
+.response-content li {
+    margin: 0.3em 0;
+    line-height: 1.6;
+}
+
+/* Format paragraphs */
+.response-content p {
+    margin: 0.5em 0;
+    text-align: justify;
+    line-height: 1.6;
+    text-indent: 0;
+}
+
+/* Format bold text */
+.response-content strong {
+    font-weight: bold;
+    color: #1a5490;
+    font-family: "Arial", sans-serif;
+}
+
+/* Format code/technical terms */
+.response-content code {
+    background-color: #f5f5f5;
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    font-family: "Courier New", monospace;
+    font-size: 10pt;
+}
+
+/* Format tables in responses */
+.response-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+    font-size: 10pt;
+    page-break-inside: auto;
+}
+
+.response-content table th,
+.response-content table td {
+    border: 1px solid #d0d0d0;
+    padding: 0.5em 0.75em;
+    text-align: left;
+    vertical-align: top;
+}
+
+.response-content table th {
+    background-color: #1a5490;
+    color: white;
+    font-weight: bold;
+    font-family: "Arial", sans-serif;
+}
+
+.response-content table tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+.response-content table tr:hover {
+    background-color: #f0f0f0;
+}
+
+/* Ensure tables don't break awkwardly */
+.response-content table {
+    break-inside: auto;
+    page-break-inside: auto;
+}
+
+.response-content table thead {
+    display: table-header-group;
+}
+
+.response-content table tbody {
+    display: table-row-group;
+}
+
+/* Footer */
+.footer {
+    position: running(footer);
+    width: 100%;
+    text-align: center;
+    font-size: 9pt;
+    font-family: "Calibri", "Arial", sans-serif;
+    color: #666666;
+    padding-top: 0.4em;
+    border-top: 1px solid #d0d0d0;
+    margin-top: 0.5em;
+}
+
+.footer-content {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.4em;
+}
+
+.footer-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+}
+
+.footer-company {
+    font-weight: bold;
+    color: #1a5490;
+}
+
+.footer-separator {
+    color: #999999;
+    font-weight: bold;
+}
+
+.footer-website {
+    color: #666666;
+    font-style: italic;
+}
+
+.footer-page-number {
+    color: #666666;
+    margin-left: auto;
+}
+
+.page-number::before {
+    content: counter(page);
+}
+
+/* Page Breaks */
+.cover-page {
+    page-break-after: always;
+}
+
+.toc-page {
+    page-break-after: always;
+}
+
+.company-overview-page {
+    page-break-after: always;
+}
+
+/* Print optimizations */
+@media print {
+    .requirement-item,
+    .requirement-response {
+        page-break-inside: auto;
+        break-inside: auto;
+        orphans: 2;
+        widows: 2;
+    }
+    
+    .requirement-response {
+        page-break-after: auto;
+        margin-bottom: 2em;
+    }
+    
+    .requirement-header {
+        page-break-after: avoid;
+        break-after: avoid;
+    }
+    
+    .requirement-content {
+        page-break-inside: auto;
+        break-inside: auto;
+    }
+    
+    .section-title {
+        page-break-after: avoid;
+    }
+    
+    .requirement-title {
+        page-break-after: avoid;
+    }
+}
+
+/* Links */
+a {
+    color: #1a5490;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}

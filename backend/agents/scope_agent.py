@@ -15,71 +15,30 @@ SCOPE_MODEL = "gpt-5-chat"
 COMPARISON_MODEL = "gpt-5-chat"
 
 
-SCOPE_SYSTEM_PROMPT = """
-You are an RFP analysis assistant. Your task is to extract the text that is NECESSARY to create a response to this RFP.
+SCOPE_SYSTEM_PROMPT = """Extract necessary RFP text (80-95% of original).
 
-KEEP in necessary_text:
-- RFP number/identifier and title
-- Introduction, Background, Objectives (all substantive content)
-- Scope of Work (all of it)
-- Requirements (functional, technical, non-functional) - ALL requirements
-- Evaluation criteria (the actual criteria)
-- Vendor qualifications
-- Proposal structure requirements (what sections to include)
-- RFP timeline/dates
-- How/where to submit questions
-- File format instructions
+Keep: requirements, scope, objectives, evaluation criteria, structure requirements.
+Remove: emails, addresses, phone numbers, contact names, signatures, metadata, headers/footers, legal boilerplate, placeholder dates like [DD Month YYYY], "Rights of the Ministry/Buyer/Company" sections.
 
-REMOVE from necessary_text (put in removed_text, small administrative snippets):
-- Procurement email addresses
-- Physical addresses
-- Phone numbers
-- Named contact people + titles
-- Signature blocks
-- Document control metadata
-- Page headers/footers
-- Copyright notices
-- Confidentiality legends
-- "Rights of the Ministry/Buyer" boilerplate sections
-- General legal disclaimers
-- Q&A process instructions
-- Shortlisting/presentation logistics
-- Evaluation admin mechanics
-- Page break markers
-- Table of contents
-- Redundant fluff paragraphs
+CRITICAL: The removed_text field MUST contain the ACTUAL removed text content (not just a description). List each removed section verbatim, separated by '---REMOVED SECTION---'.
 
-Output JSON:
-{
-  "necessary_text": "the COMPLETE RFP text with only small administrative snippets removed (80-95% of original)",
-  "removed_text": "ONLY the small administrative snippets that were removed, separated by '---REMOVED SECTION---'",
-  "rationale": "brief explanation of what was excluded"
-}
+Output JSON: necessary_text (complete text with removed parts excluded), removed_text (actual removed content, verbatim), rationale (brief explanation)."""
 
-CRITICAL: Return the COMPLETE necessary_text - do NOT truncate. Return ONLY valid JSON.
-"""
+COMPARISON_SYSTEM_PROMPT = """You are a quality assurance agent comparing the original RFP text with the extracted/cleaned text.
 
-COMPARISON_SYSTEM_PROMPT = """
-You are a validation assistant. Compare the extracted necessary text with the original RFP text to verify what was actually removed.
+Your task is to:
+1. Verify that ONLY administrative items were removed (emails, addresses, phone numbers, contact names, signatures, metadata, headers/footers, legal boilerplate)
+2. Check that NO substantive content is missing (requirements, scope, objectives, evaluation criteria, technical specifications, proposal structure requirements)
+3. Identify any substantive content that appears in the original but is missing from the extracted text
+4. Verify that the removed_text contains only administrative items, not requirements or other substantive content
 
-Your task:
-1. Identify what substantive content from the original is MISSING from the extracted text
-2. Verify that only administrative items were removed (emails, addresses, dates, formatting, etc.)
-3. Check if any important substantive content was accidentally removed
+Be thorough and specific. If you find missing substantive content, list it clearly. If everything looks good, explain what you verified.
 
-The extracted text should EXCLUDE: Administrative contact info, formatting/packaging instructions, timeline/dates sections, Q&A process, legal boilerplate.
-
-The extracted text should INCLUDE: RFP number, requirements, objectives, scope, evaluation criteria, vendor qualifications, proposal structure.
-
-Output JSON:
-{
-  "agreement": true if only administrative items were removed and all substantive content is present, false if substantive content is missing,
-  "missing_items": ["list of specific substantive content that exists in original but is missing from extracted text"],
-  "notes": "brief explanation of what was actually removed and whether it was appropriate"
-}
-
-Return valid JSON only.
-"""
+Output JSON with:
+- agreement (bool): true if only admin items removed and no substantive content missing, false otherwise
+- missing_items (list of strings): List of specific substantive content items that are in the original but missing from extracted text. Each item should be a clear description (e.g., "Requirement for 99.9% uptime SLA", "Evaluation criterion: technical approach (40 points)", "Section 3.2: Data retention requirements"). Empty list [] if nothing missing.
+- removed_items_analysis (list of strings, optional): List of substantive items found in removed_text that should NOT have been removed. Only include items that are clearly substantive (requirements, scope, objectives, etc.). Empty list [] if removed_text only contains admin items.
+- notes (string): Detailed explanation of your findings. Describe what you checked, what you found, and any concerns. Be specific - mention what types of content you verified (requirements, scope, objectives, etc.) and whether they are all present in the extracted text."""
 
 @functools.lru_cache(maxsize=128)
 def _run_scope_agent_cached(translated_text: str) -> ScopeResult:
@@ -128,18 +87,39 @@ def _run_scope_agent_cached(translated_text: str) -> ScopeResult:
         "Scope agent: processing (translated_chars=%d)",
         len(translated_text),
     )
-    user_prompt = f"""Process this RFP text. KEEP 80-95% of it in necessary_text (all requirements, objectives, scope, etc.). REMOVE only 5-20% in removed_text (small administrative snippets like emails, addresses, etc.).
+    text_input = translated_text[:30000] if len(translated_text) > 30000 else translated_text
+    user_prompt = f"""RFP text:
+{text_input}
 
-RFP text:
+Extract necessary text (80-95% of original). 
 
-{translated_text}
+REMOVE and list in removed_text:
+- Email addresses (e.g., procurement@example.com)
+- Physical addresses
+- Phone numbers
+- Contact person names and titles
+- Signature blocks
+- Placeholder dates like [DD Month YYYY]
+- Page headers/footers
+- Copyright notices
+- Legal boilerplate sections
+- "Rights of the Ministry/Buyer/Company" sections (standard procurement rights clauses)
+- Document metadata
 
-CRITICAL: Return the COMPLETE necessary_text - do NOT truncate. necessary_text should be MOST of the document."""
+KEEP in necessary_text:
+- All requirements, scope, objectives, evaluation criteria
+- Proposal structure requirements
+- Technical and functional requirements
 
-    estimated_input_tokens = len(user_prompt) // 4 + len(SCOPE_SYSTEM_PROMPT) // 4 + 500
+IMPORTANT: removed_text must contain the ACTUAL removed text verbatim, not just a description. Separate multiple removed sections with '---REMOVED SECTION---'."""
+
+    system_tokens = len(SCOPE_SYSTEM_PROMPT) // 4
+    user_tokens = len(user_prompt) // 4
+    total_input_tokens = system_tokens + user_tokens + 100
+    logger.info("Scope prompt tokens: system=%d, user=%d, total=%d", system_tokens, user_tokens, total_input_tokens)
     estimated_output_chars = len(translated_text) * 0.95 * 1.5
     estimated_output_tokens = int(estimated_output_chars // 4) + 1000
-    max_output_tokens = max(3000, min(6000, min(estimated_output_tokens, 32769 - estimated_input_tokens - 1000)))
+    max_output_tokens = max(3000, min(6000, min(estimated_output_tokens, 32769 - total_input_tokens - 1000)))
     try:
         content = chat_completion(
             model=SCOPE_MODEL,
@@ -180,6 +160,13 @@ CRITICAL: Return the COMPLETE necessary_text - do NOT truncate. necessary_text s
                 removed_text = "\n\n---REMOVED SECTION---\n\n".join(str(item) for item in removed_text if item)
             elif not isinstance(removed_text, str):
                 removed_text = str(removed_text) if removed_text else ""
+            
+            # Log removed text for debugging
+            if removed_text and len(removed_text.strip()) > 0:
+                logger.info("Scope agent: removed_text length=%d chars, preview: %s", len(removed_text), removed_text[:200])
+            else:
+                logger.warning("Scope agent: removed_text is empty - LLM may not have extracted removed content properly")
+            
             if not necessary_text or len(necessary_text.strip()) < 100:
                 logger.warning("Scope agent: necessary_text too short (%d chars), using original text", len(necessary_text) if necessary_text else 0)
                 necessary_text = translated_text
@@ -202,26 +189,59 @@ CRITICAL: Return the COMPLETE necessary_text - do NOT truncate. necessary_text s
         comparison_notes = f"Using full original text ({necessary_ratio*100:.1f}% coverage)."
     else:
         try:
-            original_sample = translated_text[:3000]
-            if len(translated_text) > 3000:
-                original_sample += "\n\n[... middle section omitted ...]\n\n" + translated_text[-1000:]
-            necessary_sample = necessary_text[:3000]
-            if len(necessary_text) > 3000:
-                necessary_sample += "\n\n[... middle section omitted ...]\n\n" + necessary_text[-1000:]
-            comparison_prompt = f"""Compare the extracted necessary text with the original RFP text.
-Original RFP text (sample, {len(translated_text)} total chars):
+            # Use larger samples for better comparison - include beginning, middle, and end
+            # For original text: first 5000, middle 2000, last 3000
+            # For extracted text: first 5000, middle 2000, last 3000
+            # For removed text: up to 2000 chars
+            orig_parts = []
+            if len(translated_text) > 10000:
+                orig_parts.append(f"[BEGINNING - first 5000 chars]:\n{translated_text[:5000]}")
+                mid_start = len(translated_text) // 2 - 1000
+                orig_parts.append(f"\n\n[MIDDLE - around position {mid_start}]:\n{translated_text[mid_start:mid_start+2000]}")
+                orig_parts.append(f"\n\n[END - last 3000 chars]:\n{translated_text[-3000:]}")
+            else:
+                orig_parts.append(translated_text)
+            original_sample = "\n".join(orig_parts)
+            
+            nec_parts = []
+            if len(necessary_text) > 10000:
+                nec_parts.append(f"[BEGINNING - first 5000 chars]:\n{necessary_text[:5000]}")
+                mid_start = len(necessary_text) // 2 - 1000
+                nec_parts.append(f"\n\n[MIDDLE - around position {mid_start}]:\n{necessary_text[mid_start:mid_start+2000]}")
+                nec_parts.append(f"\n\n[END - last 3000 chars]:\n{necessary_text[-3000:]}")
+            else:
+                nec_parts.append(necessary_text)
+            necessary_sample = "\n".join(nec_parts)
+            
+            rem_sample = removed_text[:2000] if len(removed_text) > 2000 else removed_text
+            
+            comparison_prompt = f"""ORIGINAL RFP TEXT (total {len(translated_text)} characters):
 {original_sample}
-Extracted necessary text (sample, {len(necessary_text)} total chars, {necessary_ratio*100:.1f}% of original):
-{necessary_sample}
-Removed text (what was excluded, {len(removed_text)} chars):
-{removed_text[:1000]}{'...' if len(removed_text) > 1000 else ''}
-Your task:
-1. Check if any substantive content from the original is missing from the extracted text
-2. Verify that the removed_text only contains administrative items (emails, addresses, dates, formatting, etc.)
-3. Identify if any important requirements, objectives, scope, or evaluation criteria were accidentally removed"""
 
-            estimated_input_tokens = len(comparison_prompt) // 4 + len(COMPARISON_SYSTEM_PROMPT) // 4 + 500
-            max_output_tokens = max(1000, min(2000, 32769 - estimated_input_tokens - 1000))  # Very low limit for comparison (just needs JSON)
+EXTRACTED/CLEANED TEXT (total {len(necessary_text)} characters):
+{necessary_sample}
+
+REMOVED TEXT (total {len(removed_text)} characters):
+{rem_sample if removed_text else "(empty - no text was removed)"}
+
+TASK:
+1. Compare the original text with the extracted text. Identify any substantive content (requirements, scope, objectives, evaluation criteria, technical specs, proposal structure requirements) that appears in the ORIGINAL but is MISSING from the EXTRACTED text.
+
+2. Analyze the REMOVED text. Check if it contains only administrative items (emails, addresses, phone numbers, contact names, signatures, metadata, headers/footers, legal boilerplate) OR if it incorrectly contains substantive content (requirements, scope, objectives, etc.).
+
+3. Provide a detailed analysis:
+   - List any missing substantive items from the original that should be in extracted
+   - List any substantive items found in removed_text that should NOT have been removed
+   - Explain what you verified and your overall assessment
+
+Be thorough and specific. If you find problems, list them clearly. If everything is correct, explain what you verified."""
+
+            comp_system_tokens = len(COMPARISON_SYSTEM_PROMPT) // 4
+            comp_user_tokens = len(comparison_prompt) // 4
+            comp_total = comp_system_tokens + comp_user_tokens + 100
+            logger.info("Comparison prompt tokens: system=%d, user=%d, total=%d", comp_system_tokens, comp_user_tokens, comp_total)
+            # Increased max tokens to allow for detailed analysis with missing items and notes
+            max_output_tokens = max(2000, min(4000, 32769 - comp_total - 1000))
             comparison_content = chat_completion(
                 model=COMPARISON_MODEL,
                 messages=[
@@ -237,25 +257,61 @@ Your task:
                 if isinstance(comparison_agreement, str):
                     comparison_agreement = comparison_agreement.lower() in ('true', 'yes', '1')
                 missing_items = comparison_data.get("missing_items", [])
+                removed_items_analysis = comparison_data.get("removed_items_analysis", [])
                 notes = comparison_data.get("notes", "")
+                
+                # Build detailed comparison notes from actual findings
+                note_parts = []
+                
                 if missing_items:
-                    comparison_notes = f"Missing items: {', '.join(str(item) for item in missing_items[:5])}"
-                    if len(missing_items) > 5:
-                        comparison_notes += f" (and {len(missing_items) - 5} more)"
+                    note_parts.append(f"⚠️ MISSING SUBSTANTIVE CONTENT ({len(missing_items)} items):")
+                    for i, item in enumerate(missing_items[:10], 1):
+                        note_parts.append(f"  {i}. {str(item)[:200]}")
+                    if len(missing_items) > 10:
+                        note_parts.append(f"  ... and {len(missing_items) - 10} more items")
+                
+                if removed_items_analysis:
+                    # Handle list of strings (substantive items that were incorrectly removed)
+                    substantive_removed = []
+                    for item in removed_items_analysis:
+                        if isinstance(item, str):
+                            substantive_removed.append(item)
+                        elif isinstance(item, dict):
+                            # Handle dict format if LLM uses it
+                            item_text = item.get("item", item.get("content", item.get("text", str(item))))
+                            if item_text:
+                                substantive_removed.append(str(item_text))
+                    
+                    if substantive_removed:
+                        note_parts.append(f"\n⚠️ SUBSTANTIVE CONTENT INCORRECTLY REMOVED ({len(substantive_removed)} items):")
+                        for i, item in enumerate(substantive_removed[:10], 1):
+                            note_parts.append(f"  {i}. {str(item)[:200]}")
+                        if len(substantive_removed) > 10:
+                            note_parts.append(f"  ... and {len(substantive_removed) - 10} more items")
+                
+                if notes:
+                    note_parts.append(f"\n📋 ANALYSIS:\n{notes}")
+                
+                if not note_parts:
+                    # No issues found - but still include the LLM's analysis
                     if notes:
-                        comparison_notes += f". {notes}"
-                elif notes:
-                    comparison_notes = notes
-                else:
-                    comparison_notes = f"Validation passed. Coverage: {necessary_ratio*100:.1f}%."
+                        note_parts.append(f"✅ VALIDATION PASSED:\n{notes}")
+                    else:
+                        note_parts.append(f"✅ Validation passed. Coverage: {necessary_ratio*100:.1f}%.")
+                
+                comparison_notes = "\n".join(note_parts)
+                
                 logger.info(
-                    "Scope agent: comparison step completed (agreement=%s, coverage=%.1f%%)",
+                    "Scope agent: comparison step completed (agreement=%s, missing_items=%d, coverage=%.1f%%)",
                     comparison_agreement,
+                    len(missing_items),
                     necessary_ratio * 100
                 )
+                if missing_items:
+                    logger.warning("Scope agent: comparison found %d missing substantive items", len(missing_items))
             else:
                 logger.warning("Scope agent: comparison step returned invalid data")
-                comparison_notes = f"Comparison validation returned invalid data. Coverage: {necessary_ratio*100:.1f}%."
+                comparison_notes = f"⚠️ Comparison validation returned invalid data. Coverage: {necessary_ratio*100:.1f}%. Please review manually."
         except Exception as e:
             logger.warning("Scope agent: comparison step failed (non-critical): %s", str(e))
             comparison_agreement = True
