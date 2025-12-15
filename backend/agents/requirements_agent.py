@@ -14,45 +14,46 @@ logger = logging.getLogger(__name__)
 REQUIREMENTS_MODEL = "gpt-5-chat"
 
 
-REQUIREMENTS_SYSTEM_PROMPT = """
-You are an RFP requirements analyst. Your ONLY job is to SORT all requirements in the RFP text into two categories. You MUST NOT filter, skip, or decide importance - you must extract ALL requirements.
+REQUIREMENTS_SYSTEM_PROMPT = """Extract and categorize RFP requirements.
 
-1. solution_requirements: What the buyer wants (functional, technical, security, SLA, performance, etc.)
-2. response_structure_requirements: How to respond (format, language, page limits, submission method, structure, etc.)
+1. solution_requirements: What buyer wants (functional, technical, security, etc.)
+2. response_structure_requirements: How to respond (format, structure, etc.)
 
-CRITICAL RULES:
-- Extract ALL requirements from the text - do NOT skip any requirement, even if it seems minor or redundant
-- Do NOT decide if a requirement is important or not - extract ALL of them
-- Do NOT filter out requirements - your job is ONLY to sort them into the two categories
-- If a requirement could fit in both categories, put it in solution_requirements
+CRITICAL EXTRACTION RULES:
+- Extract COMPLETE requirement statements, not individual sentences
+- Group related requirements that appear together in the same paragraph or bullet point
+- Only split into separate requirements when they are clearly distinct, standalone requirements
+- Look for natural boundaries: paragraphs, numbered/bulleted lists, section headers
+- A single requirement may span multiple sentences if they describe one cohesive requirement
+- Do NOT split a requirement just because it contains multiple sentences or clauses
+- Extract ALL requirements - do NOT skip any, but group related ones together
 
-For each requirement:
-- id: short identifier (e.g., "SOL-ARCH-01", "RESP-FORMAT-01")
-- type: "mandatory", "optional", or "unspecified" (based on explicit language in the text, not your judgment)
-- source_text: COMPLETE original text from RFP (verbatim, all paragraphs, all details - DO NOT summarize)
-- normalized_text: concise summary for quick reference
-- category: tag (e.g., "Architecture", "Security", "Submission-Format")
+EXAMPLES:
+- GOOD: One requirement = "Provide an enterprise-grade BPM platform, licensed for MTI's anticipated user base (internal and external users). Support both workbasket and worklist paradigms for task distribution and assignment."
+- BAD: Two separate requirements for each sentence above
 
-CRITICAL: source_text must be the FULL original text verbatim. Extract ALL requirements - completeness is more important than filtering.
+- GOOD: One requirement = "The system must support integration with existing systems such as document management, email, identity management, and core line-of-business systems."
+- BAD: Four separate requirements (one per system type)
 
-Output JSON: solution_requirements (list), response_structure_requirements (list), notes (string). Valid JSON only.
-"""
+For each requirement: id, type (mandatory/optional/unspecified), source_text (FULL original text verbatim), normalized_text, category.
 
-@functools.lru_cache(maxsize=128)
+Output JSON: solution_requirements, response_structure_requirements, notes."""
+
+@functools.lru_cache(maxsize=512)
 def _run_requirements_agent_cached(essential_text: str, structured_info_json: str) -> RequirementsResult:
     structured_info = json.loads(structured_info_json) if structured_info_json else {}
-    user_prompt = (
-        f"Scoped RFP text:\n\n{essential_text}\n\n"
-        f"Structured info: {structured_info}\n\n"
-        "Extract ALL requirements from the text. Do NOT skip any requirements. Your job is ONLY to sort them into solution_requirements or response_structure_requirements. Extract every requirement you find, even if it seems minor or redundant. source_text must be COMPLETE original text verbatim (all paragraphs, all details)."
-    )
+    text_input = essential_text[:30000] if len(essential_text) > 30000 else essential_text
+    user_prompt = f"RFP:\n{text_input}\n\nExtract ALL requirements. Group related requirements together - do NOT split into individual sentences. Sort into solution_requirements or response_structure_requirements. source_text must be COMPLETE original text verbatim (full paragraph/bullet point)."
     logger.info(
         "Requirements agent: processing (essential_chars=%d, has_structured=%s)",
         len(essential_text),
         bool(structured_info),
     )
-    estimated_input_tokens = len(user_prompt) // 4 + len(REQUIREMENTS_SYSTEM_PROMPT) // 4 + 500  # +500 for overhead
-    max_output_tokens = max(4000, min(10000, 32769 - estimated_input_tokens - 1000))  # Reduced to 10000 to avoid timeouts
+    system_tokens = len(REQUIREMENTS_SYSTEM_PROMPT) // 4
+    user_tokens = len(user_prompt) // 4
+    total_input_tokens = system_tokens + user_tokens + 100
+    logger.info("Requirements prompt tokens: system=%d, user=%d, total=%d", system_tokens, user_tokens, total_input_tokens)
+    max_output_tokens = max(4000, min(10000, 32769 - total_input_tokens - 1000))
     content = chat_completion(
         model=REQUIREMENTS_MODEL,
         messages=[
@@ -88,7 +89,7 @@ def _run_requirements_agent_cached(essential_text: str, structured_info_json: st
                         if brace_count == 0:
                             cleaned = cleaned[start_idx:i+1]
                             break
-        cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)  # Trailing commas
+        cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
         
         def fix_string_value(match):
             content = match.group(1)

@@ -241,7 +241,6 @@ def extract_text_from_file(path: PathLike) -> str:
     if not images:
         logger.error("[Text Extraction] ✗ ERROR: No images generated from file: %s", path)
         logger.warning("[Text Extraction] Returning any text from direct extraction (if available)")
-        # If we have some text from direct extraction, return it even if short
         result = direct_text if direct_text else ""
         logger.info("[Text Extraction] Final result: %d characters", len(result))
         return result

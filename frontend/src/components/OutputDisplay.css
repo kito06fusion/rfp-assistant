@@ -1,0 +1,14 @@
+.output-display {
+  max-height: 260px;
+  overflow: auto;
+  padding: 0.75rem;
+  background: radial-gradient(circle at top left, #020617, #020617 55%, #020617);
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #e5e7eb;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+

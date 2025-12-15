@@ -1,0 +1,42 @@
+.app-main {
+  max-width: 1600px;
+  margin: 2rem auto 3rem;
+  padding: 0 1.5rem;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 400px;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.main-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0; /* Allow shrinking */
+}
+
+.chat-sidebar {
+  position: sticky;
+  top: 2rem;
+  height: calc(100vh - 4rem);
+  max-height: calc(100vh - 4rem);
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 1200px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  
+  .chat-sidebar {
+    position: relative;
+    top: 0;
+    height: auto;
+    max-height: 600px;
+  }
+}
+

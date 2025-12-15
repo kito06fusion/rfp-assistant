@@ -14,39 +14,25 @@ logger = logging.getLogger(__name__)
 EXTRACTION_MODEL = "gpt-5-chat"
 
 
-EXTRACTION_SYSTEM_PROMPT = """
-You are an RFP analyst. Extract ONLY information explicitly written in the document.
+EXTRACTION_SYSTEM_PROMPT = """Extract RFP info. Output JSON:
+- language: ISO code (e.g., 'en')
+- translated_text: English text
+- cpv_codes: array (only if explicitly written)
+- other_codes: array (only if written, format "TYPE: VALUE")
+- key_requirements_summary: 10-15 bullet points
 
-Tasks:
-1. Detect language (ISO code: "en", "fr", etc.)
-2. Translate to English if needed
-3. Extract codes - ONLY if explicitly stated
-4. Provide 10-15 bullet summary of key requirements
+Rules: Extract only what's written. No inventing codes/dates. No metadata."""
 
-CRITICAL RULES:
-- Do NOT invent codes. Only extract codes that are literally written with their type (e.g., "CPV 12345678"). If no codes found, return empty lists [].
-- Do NOT invent or infer dates or deadlines. Only extract dates that are explicitly written in the document. If dates are placeholders like "[DD Month YYYY]", do NOT convert them to actual dates.
-- Do NOT include a metadata field with deadlines, budget, or other inferred information. Only extract what is explicitly written.
-
-Output JSON:
-- language: ISO code
-- translated_text: full English text
-- cpv_codes: list of strings (only if written in document)
-- other_codes: list of strings "TYPE: VALUE" (only if written)
-- key_requirements_summary: markdown bullets
-
-Do NOT include a metadata field. Return valid JSON only.
-"""
-
-@functools.lru_cache(maxsize=128)
+@functools.lru_cache(maxsize=512)
 def _run_extraction_agent_cached(document_text: str) -> ExtractionResult:
-    user_prompt = (
-        f"RFP document:\n\n```rfp_text\n{document_text}\n```\n\n"
-        "Extract ONLY what is explicitly written. Do NOT invent codes or dates. Do NOT include metadata. Return empty lists if not found."
-    )
+    doc_text = document_text[:15000] if len(document_text) > 15000 else document_text
+    user_prompt = f"RFP:\n{doc_text}\n\nExtract. JSON only. No inventing."
     logger.info("Extraction agent: processing (input_chars=%d)", len(document_text))
-    estimated_input_tokens = len(user_prompt) // 4 + len(EXTRACTION_SYSTEM_PROMPT) // 4 + 500  # +500 for overhead
-    max_output_tokens = max(2000, min(6000, 32769 - estimated_input_tokens - 1000))  # Reduced to 6000 for extraction (simpler task)
+    system_tokens = len(EXTRACTION_SYSTEM_PROMPT) // 4
+    user_tokens = len(user_prompt) // 4
+    total_input_tokens = system_tokens + user_tokens + 100
+    logger.info("Extraction prompt tokens: system=%d, user=%d, total=%d", system_tokens, user_tokens, total_input_tokens)
+    max_output_tokens = max(3000, min(8000, 32769 - total_input_tokens - 1000))
     content = chat_completion(
         model=EXTRACTION_MODEL,
         messages=[

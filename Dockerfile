@@ -7,7 +7,15 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends poppler-utils && \
+    apt-get install -y --no-install-recommends \
+        poppler-utils \
+        libpango-1.0-0 \
+        libpangoft2-1.0-0 \
+        libfontconfig1 \
+        libcairo2 \
+        libgdk-pixbuf-2.0-0 \
+        shared-mime-info \
+        libgobject-2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -17,6 +25,7 @@ RUN pip install --upgrade pip && \
 
 COPY backend backend
 COPY frontend frontend
+COPY image.png image.png
 
 EXPOSE 8001
 

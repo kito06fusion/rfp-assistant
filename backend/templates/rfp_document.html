@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ rfp_title }}</title>
+</head>
+<body>
+    <!-- Cover Page -->
+    <div class="cover-page">
+        <div class="cover-header">
+            <img src="{{ company_info.logo_path }}" alt="{{ company_info.name }} Logo" class="company-logo">
+        </div>
+        <div class="cover-content">
+            <h1 class="cover-title">{{ rfp_title }}</h1>
+            <p class="cover-date">{{ date }}</p>
+            <p class="cover-company">{{ company_info.name }}</p>
+            <p class="cover-website">{{ company_info.website }}</p>
+        </div>
+    </div>
+
+    <!-- Table of Contents -->
+    <div class="toc-page">
+        <h1 class="section-title">Table of Contents</h1>
+        <div class="toc-content">
+            <div class="toc-section">
+                <h2 class="toc-heading">Solution Requirement Responses</h2>
+                <ul class="toc-list">
+                    {% for resp in individual_responses %}
+                    <li><a href="#req-{{ loop.index }}">{{ resp.requirement_id }}: {{ resp.key_phrase|default(resp.requirement_text[:60] + "...") }}</a></li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Company Overview -->
+    <div class="company-overview-page">
+        <h1 class="section-title">Company Overview</h1>
+        <div class="company-overview-content">
+            <div class="company-logo-section">
+                <img src="{{ company_info.logo_path }}" alt="{{ company_info.name }} Logo" class="overview-logo">
+            </div>
+            <div class="company-text">
+                {{ company_info.overview|replace('\n', '<br>')|safe }}
+            </div>
+        </div>
+    </div>
+
+    <!-- Solution Requirement Responses -->
+    <div class="solution-requirements-section">
+        <h1 class="section-title">Solution Requirement Responses</h1>
+        {% for resp in individual_responses %}
+        <div class="requirement-response" id="req-{{ loop.index }}">
+            <div class="requirement-header">
+                <span class="requirement-id">{{ resp.requirement_id }}</span>
+                <span class="requirement-key-phrase">{{ resp.key_phrase|default(resp.requirement_text[:80] + "...") }}</span>
+            </div>
+            <div class="requirement-content">
+                <div class="response-content">
+                    {{ resp.response|format_response|safe }}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Footer on each page -->
+    <div class="footer">
+        <div class="footer-content">
+            <span class="footer-company">{{ company_info.name }}</span>
+            <span class="footer-separator">|</span>
+            <span class="footer-website">{{ company_info.website }}</span>
+            <span class="footer-page-number">Page <span class="page-number"></span></span>
+        </div>
+    </div>
+</body>
+</html>
