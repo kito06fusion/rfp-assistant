@@ -89,11 +89,13 @@ CRITICAL RULES:
 - Be specific and concrete - use fusionAIx capabilities, case studies, and accelerators where relevant
 - **CRITICAL: If USER-PROVIDED INFORMATION (Q&A) is provided, you MUST use the FULL, COMPLETE answers - do NOT summarize or condense them. If the user provided detailed project information, include those full details. If they provided certifications, include the full list. Match the depth and detail level of the Q&A answers.**
 - **NEVER make up information (numbers, metrics, team sizes, etc.) - if the requirement asks for specific information and it's not in the Q&A or knowledge base, you should note that this information needs to be provided.**
+- **QUALITY REQUIREMENT: This document must be as detailed and comprehensive as individual per-requirement responses would be. Each section should be thorough (1500-3000 words per major section), specific, and address requirements in depth. This is NOT a summary - it is a complete, detailed response document.**
 - Maintain professional tone and clear organization
 - Ensure all mandatory sections are included
 - Map solution requirements to appropriate sections
 - Provide comprehensive responses that fully address the RFP requirements
-- When Q&A context is provided, integrate the FULL information naturally throughout relevant sections - don't just list it, weave it into a cohesive answer with all the details"""
+- When Q&A context is provided, integrate the FULL information naturally throughout relevant sections - don't just list it, weave it into a cohesive answer with all the details
+- Use the knowledge base and RAG context extensively - reference specific capabilities, case studies, and accelerators with concrete details"""
 
 
 QUALITY_SYSTEM_PROMPT = """You are an expert at assessing RFP response quality.

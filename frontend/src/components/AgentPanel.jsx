@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { usePipeline } from '../context/PipelineContext'
-import { runRequirements, buildQuery, generateResponse, generateQuestions, createChatSession, addQuestionsToSession, previewResponses, updateResponse, generatePDFFromPreview, updateScope, updateRequirements } from '../services/api'
+import { runRequirements, buildQuery, generateResponse, generateQuestions, createChatSession, addQuestionsToSession, previewResponses, updateResponse, generatePDFFromPreview, updateScope, updateRequirements, getSession } from '../services/api'
 import StatusPill from './StatusPill'
 import OutputDisplay from './OutputDisplay'
-import CheckboxControl from './CheckboxControl'
 import Button from './Button'
 import ChatInterface from './ChatInterface'
 import ResponsePreview from './ResponsePreview'
@@ -76,6 +75,7 @@ export default function AgentPanel({ agentId }) {
   const [requirementsDraft, setRequirementsDraft] = useState('')
   const [buildQueryDraft, setBuildQueryDraft] = useState('')
   const [questionsGenerated, setQuestionsGenerated] = useState(false)
+  const [allQuestionsAnswered, setAllQuestionsAnswered] = useState(false)
   
   // Auto-show chat when viewing requirements panel if session exists
   useEffect(() => {
@@ -84,6 +84,72 @@ export default function AgentPanel({ agentId }) {
       setShowChat(true)
     }
   }, [agentId, chatSessionId])
+
+  // Check if all questions are answered
+  useEffect(() => {
+    if (!chatSessionId || !questionsGenerated) {
+      setAllQuestionsAnswered(false)
+      return
+    }
+
+    let intervalId = null
+    let isMounted = true
+
+    const checkQuestionsStatus = async () => {
+      if (!isMounted) return
+
+      try {
+        const sessionData = await getSession(chatSessionId)
+        const questions = sessionData.questions || []
+        const answers = sessionData.answers || []
+        
+        if (questions.length === 0) {
+          // No questions means all are "answered" (nothing to answer)
+          if (isMounted) {
+            setAllQuestionsAnswered(true)
+          }
+          if (intervalId) {
+            clearInterval(intervalId)
+            intervalId = null
+          }
+          return
+        }
+
+        // Check if all questions have been answered
+        const allAnswered = questions.every(q => {
+          return q.answered || answers.some(a => a.question_id === q.question_id)
+        })
+        
+        if (isMounted) {
+          setAllQuestionsAnswered(allAnswered)
+        }
+
+        // Stop polling once all questions are answered
+        if (allAnswered && intervalId) {
+          clearInterval(intervalId)
+          intervalId = null
+        }
+      } catch (err) {
+        console.error('Failed to check questions status:', err)
+        if (isMounted) {
+          setAllQuestionsAnswered(false)
+        }
+      }
+    }
+
+    // Initial check
+    checkQuestionsStatus()
+    
+    // Poll every 2 seconds, but stop once all questions are answered
+    intervalId = setInterval(checkQuestionsStatus, 2000)
+    
+    return () => {
+      isMounted = false
+      if (intervalId) {
+        clearInterval(intervalId)
+      }
+    }
+  }, [chatSessionId, questionsGenerated])
   const config = AGENT_CONFIGS[agentId]
 
   // Handle scope acceptance
@@ -192,10 +258,20 @@ export default function AgentPanel({ agentId }) {
   // Handle response generation (direct PDF)
   const handleGenerateResponse = async () => {
     if (!pipelineData.extraction || !pipelineData.requirements || !confirmations.buildQueryConfirmed) {
+      console.warn('Cannot generate response: missing data or confirmation', {
+        hasExtraction: !!pipelineData.extraction,
+        hasRequirements: !!pipelineData.requirements,
+        buildQueryConfirmed: confirmations.buildQueryConfirmed
+      })
       return
     }
 
     try {
+      console.log('Starting response generation...', {
+        sessionId: chatSessionId,
+        useRag: true,
+        numRetrievalChunks: 5
+      })
       updateStatus('response', 'processing')
       setSummary('Generating response for each requirement... This may take several minutes.')
       const response = await generateResponse(
@@ -207,6 +283,7 @@ export default function AgentPanel({ agentId }) {
           session_id: chatSessionId, // Include Q&A context if available
         }
       )
+      console.log('Response generation completed:', response.type || 'json')
 
       if (response.type === 'pdf') {
         // Download PDF
@@ -421,11 +498,13 @@ export default function AgentPanel({ agentId }) {
         const sessionData = await createChatSession()
         await addQuestionsToSession(sessionData.session_id, questionsData.questions)
         setChatSessionId(sessionData.session_id)
+        setAllQuestionsAnswered(false) // Questions exist, need to be answered
         setSummary(`Query confirmed. ${questionsData.questions.length} question(s) available in chat panel.`)
         console.log('Chat session created:', sessionData.session_id)
         console.log(`Generated ${questionsData.questions.length} question(s). Check the chat panel on the right.`)
       } else {
         console.log('No questions generated (all information is clear in knowledge base / RAG)')
+        setAllQuestionsAnswered(true) // No questions means all are "answered"
         setSummary('Query confirmed. No additional questions needed.')
       }
     } catch (qErr) {
@@ -599,25 +678,16 @@ export default function AgentPanel({ agentId }) {
         <OutputDisplay content={content} />
       )}
       
-      {config.showAccept && agentId === 'scope' && pipelineData.scope && (
-        <div className="accept-row scope-accept-row">
-          <div className="scope-accept-text">
-            <div className="scope-accept-title">Scoped text review</div>
-            <div className="scope-accept-subtitle">
-              Confirm when you’re happy with the cleaned RFP text. Requirements will be generated from this version.
-            </div>
-          </div>
-          <Button
-            onClick={() => updateConfirmation('scopeAccepted', !confirmations.scopeAccepted)}
-            className={`scope-accept-button ${confirmations.scopeAccepted ? 'accepted' : ''}`}
-          >
-            {confirmations.scopeAccepted ? '✓ Scope accepted' : 'Accept scoped text'}
-          </Button>
-        </div>
-      )}
-      
       {agentId === 'scope' && pipelineData.scope && (
-        <div className="accept-row" style={{ marginTop: '0.5rem' }}>
+        <div className="accept-row" style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
+          {config.showAccept && (
+            <Button
+              onClick={() => updateConfirmation('scopeAccepted', !confirmations.scopeAccepted)}
+              className={confirmations.scopeAccepted ? 'accepted' : ''}
+            >
+              {confirmations.scopeAccepted ? '✓ Scope accepted' : 'Accept scoped text'}
+            </Button>
+          )}
           <Button onClick={handleToggleScopeEdit}>
             {editable.scope ? 'Close editor' : 'Edit scoped text'}
           </Button>
@@ -667,14 +737,14 @@ export default function AgentPanel({ agentId }) {
             </div>
           )}
 
-          {questionsGenerated && (
-            <div className="accept-row" style={{ marginTop: '0.5rem' }}>
-              <CheckboxControl
-                id="confirm-build-query-final"
-                label="I confirm this final build query"
-                checked={confirmations.buildQueryConfirmed}
-                onChange={(checked) => updateConfirmation('buildQueryConfirmed', checked)}
-              />
+          {questionsGenerated && allQuestionsAnswered && (
+            <div className="accept-row" style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
+              <Button
+                onClick={() => updateConfirmation('buildQueryConfirmed', !confirmations.buildQueryConfirmed)}
+                className={confirmations.buildQueryConfirmed ? 'accepted' : ''}
+              >
+                {confirmations.buildQueryConfirmed ? '✓ Build query confirmed' : 'Confirm build query'}
+              </Button>
               <Button
                 variant="secondary"
                 onClick={handleToggleBuildQueryEdit}
@@ -683,10 +753,16 @@ export default function AgentPanel({ agentId }) {
               </Button>
             </div>
           )}
+          
+          {questionsGenerated && !allQuestionsAnswered && chatSessionId && (
+            <div className="accept-row" style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'rgba(37, 99, 235, 0.1)', border: '1px solid rgba(37, 99, 235, 0.3)', borderRadius: '0.5rem', color: '#60a5fa' }}>
+              Please answer all questions in the chat panel before confirming the build query.
+            </div>
+          )}
         </>
       )}
       
-      {config.showGenerate && agentId === 'build-query' && confirmations.buildQueryConfirmed && questionsGenerated && (
+      {config.showGenerate && agentId === 'build-query' && confirmations.buildQueryConfirmed && questionsGenerated && allQuestionsAnswered && (
         <div className="accept-row" style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
           <Button onClick={handlePreviewResponses} disabled={status === 'processing'}>
             Preview Responses

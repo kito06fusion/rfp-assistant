@@ -85,26 +85,49 @@ def run_structured_response_agent(
     retrieved_chunks: List[Dict[str, Any]] = []
     if rag_system is not None:
         try:
-            search_query = f"{structure_detection.structure_description}\n{requirements_result.solution_requirements[0].normalized_text if requirements_result.solution_requirements else ''}"
-            retrieved_chunks = rag_system.search(search_query, k=min(num_retrieval_chunks, 5))
-            logger.info("Retrieved %d chunks from RAG", len(retrieved_chunks))
+            all_chunks = []
+            seen_chunk_ids = set()
+            
+            structure_chunks = rag_system.search(structure_detection.structure_description, k=min(3, num_retrieval_chunks))
+            for chunk in structure_chunks:
+                chunk_id = chunk.get("chunk_id") or str(chunk.get("chunk_text", ""))[:50]
+                if chunk_id not in seen_chunk_ids:
+                    all_chunks.append(chunk)
+                    seen_chunk_ids.add(chunk_id)
+            
+            for req in requirements_result.solution_requirements[:5]:  # Search top 5 requirements
+                if len(all_chunks) >= num_retrieval_chunks * 2:  # Limit total chunks
+                    break
+                try:
+                    req_chunks = rag_system.search(req.normalized_text, k=min(2, num_retrieval_chunks))
+                    for chunk in req_chunks:
+                        chunk_id = chunk.get("chunk_id") or str(chunk.get("chunk_text", ""))[:50]
+                        if chunk_id not in seen_chunk_ids:
+                            all_chunks.append(chunk)
+                            seen_chunk_ids.add(chunk_id)
+                except Exception as req_e:
+                    logger.warning("Failed to search RAG for requirement %s: %s", req.id, req_e)
+            
+            retrieved_chunks = all_chunks[:num_retrieval_chunks * 2]  # Allow more chunks for structured response
+            logger.info("Retrieved %d chunks from RAG (searched structure + %d requirements)", len(retrieved_chunks), min(5, len(requirements_result.solution_requirements)))
         except Exception as e:
             logger.warning("Failed to retrieve chunks from RAG: %s", str(e))
             retrieved_chunks = []
     
-    chunks_text = format_retrieved_chunks(retrieved_chunks)
+    chunks_text = format_retrieved_chunks(retrieved_chunks, max_chunks=8, max_total_chars=5000)
     
     fusionaix_context = ""
     if knowledge_base is not None:
         try:
             req_text = " ".join([
-                req.normalized_text[:100] 
-                for req in requirements_result.solution_requirements[:3]
+                req.normalized_text[:200]  # Increased from 100 to 200 chars per requirement
+                for req in requirements_result.solution_requirements[:8]  # Increased from 3 to 8 requirements
             ])
             fusionaix_context = knowledge_base.format_for_prompt(req_text)
-            if len(fusionaix_context) > 1000:
-                fusionaix_context = fusionaix_context[:1000] + "..."
-            logger.info("Included fusionAIx knowledge base context (%d chars)", len(fusionaix_context))
+            # Increased limit from 1000 to 3000 chars for more comprehensive context
+            if len(fusionaix_context) > 3000:
+                fusionaix_context = fusionaix_context[:3000] + "..."
+            logger.info("Included fusionAIx knowledge base context (%d chars, from %d requirements)", len(fusionaix_context), min(8, len(requirements_result.solution_requirements)))
         except Exception as kb_exc:
             logger.warning("Failed to format knowledge base context: %s", kb_exc)
             fusionaix_context = ""
@@ -170,11 +193,13 @@ def run_structured_response_agent(
         "YOUR RESPONSE MUST:",
         "1. Include ALL required sections in the specified order",
         "2. Address relevant solution requirements in each section",
-        "3. Be comprehensive and detailed - write 1000-2000 words per major section",
+        "3. Be comprehensive and detailed - write 1500-3000 words per major section. Each section should be thorough, specific, and address multiple requirements where relevant",
         "4. Use Q&A information FULLY: If Q&A context is provided above, use the COMPLETE, FULL answers - do not summarize them. If the user provided detailed project information, include those full details. If they provided a list of certifications, include the full list. Match the depth of detail provided in the Q&A.",
         "5. Use fusionAIx capabilities, case studies, and accelerators where relevant",
         "6. Follow the structure EXACTLY as specified",
         "7. Include specific details, metrics, and concrete examples throughout",
+        "8. Be as detailed as the per-requirement responses would be - this is a complete document, not a summary",
+        "9. Each section should be comprehensive enough to stand alone as a detailed response",
         "",
         "Generate the complete structured response now:",
     ])
@@ -186,7 +211,13 @@ def run_structured_response_agent(
     total_input_tokens = system_tokens + user_tokens + 100
     
     if max_tokens is None:
-        max_tokens = min(8000, 32769 - total_input_tokens - 1000)
+        num_sections = len(structure_detection.detected_sections)
+        num_requirements = len(requirements_result.solution_requirements)
+        estimated_output_tokens = max(12000, num_sections * 2500 + num_requirements * 200)
+        # Model supports max 16384 completion tokens, so cap at that
+        max_tokens = min(estimated_output_tokens, 16384)
+        logger.info("Calculated max_tokens: %d (sections=%d, requirements=%d, estimated_output=%d)", 
+                   max_tokens, num_sections, num_requirements, estimated_output_tokens)
     
     logger.info(
         "Structured response agent: calling LLM (model=%s, temperature=%s, max_tokens=%s, input_tokens=%d)",

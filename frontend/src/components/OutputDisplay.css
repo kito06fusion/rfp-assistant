@@ -1,5 +1,5 @@
 .output-display {
-  max-height: 260px;
+  max-height: 500px;
   overflow: auto;
   padding: 0.75rem;
   background: radial-gradient(circle at top left, #020617, #020617 55%, #020617);
