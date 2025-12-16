@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import './ChatInterface.css'
 import { enrichBuildQuery } from '../services/api'
 
-const API_BASE = "http://127.0.0.1:8001"
+const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8001"
 
 export default function ChatInterface({ sessionId, onClose, buildQuery, onBuildQueryUpdated }) {
   const [conversation, setConversation] = useState([]) // Q&A pairs in order
