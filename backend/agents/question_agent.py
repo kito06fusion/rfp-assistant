@@ -6,7 +6,7 @@ import re
 from typing import List, Dict, Any, Optional
 
 from backend.llm.client import chat_completion
-from backend.models import RequirementItem, Question
+from backend.models import RequirementItem, Question, BuildQuery, RequirementsResult
 from backend.rag import RAGSystem
 from backend.knowledge_base.company_kb import CompanyKnowledgeBase
 from backend.agents.prompts import QUESTION_SYSTEM_PROMPT
@@ -552,10 +552,6 @@ Output a JSON array of questions, each with:
         
         logger.info("Generated %d questions from build query (legacy mode)", len(filtered_questions))
         return filtered_questions
-        
-    except Exception as e:
-        logger.error("Question generation failed: %s", e)
-        return []
         
     except Exception as e:
         logger.error("Question generation from build query failed: %s", e)

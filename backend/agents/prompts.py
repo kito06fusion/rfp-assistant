@@ -76,7 +76,6 @@ CRITICAL RULES:
 - **CRITICAL: If USER-PROVIDED INFORMATION (Q&A) is provided, you MUST use the FULL, COMPLETE answers - do NOT summarize or condense them. If the user provided detailed project information, include those full details. If they provided certifications, include the full list. Match the depth and detail level of the Q&A answers.**
 - **NEVER make up information (numbers, metrics, team sizes, etc.) - if the requirement asks for specific information and it's not in the Q&A or knowledge base, you should note that this information needs to be provided.**
 - Write 800-1500 words (5000-10000 characters) - be comprehensive and detailed, matching the depth of the questions asked
-- Use RAG examples for CONTENT only (facts, capabilities), NOT for structure
 - NO sections like "Executive Summary", "Proposed Solution Overview", "Introduction" - just answer the requirement directly
 - Document formatting handled automatically - provide clean text content only
 - When Q&A context is provided, integrate the FULL information naturally throughout your response - don't just list it, weave it into a cohesive answer with all the details"""
@@ -134,10 +133,6 @@ Analyze the response_structure_requirements and determine:
 5. confidence: float 0.0-1.0 indicating confidence in the detection
 
 Output JSON with these fields."""
-
-
-QUALITY_COMPARISON_SYSTEM_PROMPT = QUALITY_SYSTEM_PROMPT 
-
 
 
 QUESTION_SYSTEM_PROMPT = """You are an expert at analyzing RFP requirements and identifying what information a VENDOR/RESPONDER needs to provide to create a complete, concrete response.

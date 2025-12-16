@@ -800,8 +800,6 @@ async def _generate_per_requirement_response(
             try:
                 result = run_response_agent(
                     build_query=build_query_obj,
-                    rag_system=rag_system,
-                    num_retrieval_chunks=num_retrieval_chunks,
                     knowledge_base=knowledge_base,
                     qa_context=qa_context,
                 )
@@ -1480,8 +1478,6 @@ async def preview_responses_endpoint(req: PreviewResponseRequest) -> Dict[str, A
                 
                 result = run_response_agent(
                     build_query=build_query_obj,
-                    rag_system=rag_system,
-                    num_retrieval_chunks=req.num_retrieval_chunks,
                     knowledge_base=knowledge_base,
                     qa_context=qa_context,
                 )

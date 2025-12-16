@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Optional
 
 from backend.llm.client import chat_completion
 from backend.models import BuildQuery, ResponseResult
-from backend.rag import RAGSystem
 from backend.knowledge_base import FusionAIxKnowledgeBase
 from backend.agents.prompts import RESPONSE_SYSTEM_PROMPT
 
@@ -14,51 +13,8 @@ logger = logging.getLogger(__name__)
 RESPONSE_MODEL = "gpt-5-chat"
 
 
-def format_retrieved_chunks(
-    chunks: List[Dict[str, Any]],
-    max_chunks: int = 4,
-    max_total_chars: int = 3000,
-) -> str:
-    if not chunks:
-        return ""
-
-    formatted: List[str] = ["RAG Examples (content only, ignore layout):"]
-    seen_normalized: set[str] = set()
-    total_chars = 0
-    example_idx = 1
-
-    for chunk in chunks:
-        if example_idx > max_chunks or total_chars >= max_total_chars:
-            break
-
-        chunk_text = chunk.get("chunk_text", "") or ""
-        norm = " ".join(chunk_text.split()).lower()
-        if not norm or norm in seen_normalized:
-            continue
-        seen_normalized.add(norm)
-
-        if len(chunk_text) > 800:
-            chunk_text = chunk_text[:800] + "..."
-
-        if total_chars + len(chunk_text) > max_total_chars:
-            # Trim last chunk to fit within budget
-            remaining = max_total_chars - total_chars
-            if remaining <= 0:
-                break
-            chunk_text = chunk_text[:remaining] + "..."
-
-        formatted.append(f"[Ex{example_idx}] {chunk_text}")
-        total_chars += len(chunk_text)
-        example_idx += 1
-
-    return "\n".join(formatted)
-
-
 def run_response_agent(
     build_query: BuildQuery,
-    # NOTE: rag_system is kept for backwards‑compatibility with existing callers,
-    rag_system: Optional[RAGSystem] = None,
-    num_retrieval_chunks: int = 5,
     temperature: float = 0.0,
     max_tokens: Optional[int] = None,
     knowledge_base: Optional[FusionAIxKnowledgeBase] = None,
@@ -68,13 +24,9 @@ def run_response_agent(
         raise ValueError("Build query must be confirmed before generating response")
 
     logger.info(
-        "Response agent: starting (query_length=%d, has_rag=%s, num_chunks=%d)",
+        "Response agent: starting (query_length=%d)",
         len(build_query.query_text),
-        rag_system is not None,
-        num_retrieval_chunks,
     )
-
-    chunks_text = format_retrieved_chunks(retrieved_chunks)
     
     fusionaix_context = ""
     if knowledge_base is not None:
@@ -107,10 +59,6 @@ def run_response_agent(
     
     if fusionaix_context:
         user_prompt_parts.append(f"FUSIONAIX CONTEXT: {fusionaix_context}")
-        user_prompt_parts.append("")
-    
-    if chunks_text:
-        user_prompt_parts.append(f"PRIOR RFP EXAMPLES (for content/info only): {chunks_text}")
         user_prompt_parts.append("")
     
     if qa_context:
@@ -149,7 +97,6 @@ def run_response_agent(
         "- Solution overviews",
         "- Generic introductions or conclusions",
         "- Unnecessary section headers - just answer the requirement directly",
-        "- Any structure copied from prior RFP examples",
         "",
         "Write your comprehensive response now (detailed, 5000-10000 characters):",
     ])
@@ -209,16 +156,15 @@ def run_response_agent(
             response_text = truncated + "\n\n[Response truncated for length]"
 
     logger.info(
-        "Response agent: finished (response_length=%d, chunks_used=%d, max_allowed=%d)",
+        "Response agent: finished (response_length=%d, max_allowed=%d)",
         len(response_text),
-        len(retrieved_chunks),
         MAX_RESPONSE_LENGTH,
     )
 
     return ResponseResult(
         response_text=response_text,
         build_query_used=build_query.query_text,
-        num_retrieved_chunks=len(retrieved_chunks),
-        notes=f"Generated with {len(retrieved_chunks)} RAG chunks" if retrieved_chunks else "Generated without RAG",
+        num_retrieved_chunks=0,
+        notes="Generated response",
     )
 
