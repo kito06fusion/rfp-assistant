@@ -18,5 +18,6 @@ services:
     command: uvicorn backend.app:app --host 0.0.0.0 --port 8001
     volumes:
       - ./output:/app/output
+      - ./docs:/app/docs
 
 

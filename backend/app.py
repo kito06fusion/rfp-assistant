@@ -21,12 +21,21 @@ from backend.agents.build_query import build_query, build_query_for_single_requi
 from backend.agents.response_agent import run_response_agent
 from backend.agents.structure_detection_agent import detect_structure
 from backend.agents.structured_response_agent import run_structured_response_agent
-from backend.agents.question_agent import analyze_requirements_for_questions, analyze_build_query_for_questions
+from backend.agents.question_agent import (
+    analyze_requirements_for_questions,
+    analyze_build_query_for_questions,
+    infer_answered_questions_from_answer,
+)
 from backend.agents.quality_agent import assess_response_quality
 from backend.rag import RAGSystem
 from backend.models import (
-    ExtractionResult, RequirementsResult, StructureDetectionResult,
-    Question, Answer, ConversationContext
+    ExtractionResult,
+    RequirementsResult,
+    StructureDetectionResult,
+    ScopeResult,
+    Question,
+    Answer,
+    ConversationContext,
 )
 from backend.knowledge_base import FusionAIxKnowledgeBase
 from backend.knowledge_base.company_kb import CompanyKnowledgeBase
@@ -37,15 +46,37 @@ def _setup_rag_and_kb(use_rag: bool) -> tuple[Optional[RAGSystem], FusionAIxKnow
     rag_system = None
     if use_rag:
         try:
-            rag_system = RAGSystem(docs_folder="docs", index_path="rag_index")
+            # Use project-root absolute paths so RAG always points to the correct docs folder
+            project_root = Path(__file__).parent.parent
+            docs_folder = project_root / "docs"
+            index_path = project_root / "rag_index"
+            rag_system = RAGSystem(docs_folder=str(docs_folder), index_path=str(index_path))
             try:
                 rag_system.load_index()
-                logger.info("RAG system loaded successfully from existing index")
+                stats = rag_system.get_stats()
+                logger.info(
+                    "RAG loaded existing index successfully | built=%s, docs=%s, vectors=%s, dim=%s, model=%s",
+                    stats.get("index_built"),
+                    stats.get("num_documents"),
+                    stats.get("num_vectors"),
+                    stats.get("embedding_dimension"),
+                    stats.get("embedding_model"),
+                )
             except FileNotFoundError:
-                logger.info("RAG index not found. Attempting to build index from docs folder...")
+                logger.info(
+                    "RAG index not found. Attempting to build index from docs folder '%s'...",
+                    "docs",
+                )
                 try:
                     rag_system.build_index()
-                    logger.info("RAG index built successfully from documents in docs/ folder")
+                    stats = rag_system.get_stats()
+                    logger.info(
+                        "RAG index built successfully from docs/ | docs=%s, vectors=%s, dim=%s, model=%s",
+                        stats.get("num_documents"),
+                        stats.get("num_vectors"),
+                        stats.get("embedding_dimension"),
+                        stats.get("embedding_model"),
+                    )
                 except ValueError as build_err:
                     logger.warning(
                         "Failed to build RAG index: %s. RAG system not available. "
@@ -66,6 +97,54 @@ def _setup_rag_and_kb(use_rag: bool) -> tuple[Optional[RAGSystem], FusionAIxKnow
         len(knowledge_base.accelerators),
     )
     return rag_system, knowledge_base
+
+
+def _enrich_build_query_with_rag(
+    build_query: BuildQuery,
+    requirements_result: RequirementsResult,
+    rag_contexts_by_req: Dict[str, str],
+) -> BuildQuery:
+    """
+    Enrich build query text with RAG-supported information per requirement.
+    This runs after question generation so the build query reflects what is already
+    known from prior RFPs.
+    """
+    if not rag_contexts_by_req:
+        return build_query
+
+    logger.info(
+        "Enriching build query with RAG for %d requirement(s)",
+        len(rag_contexts_by_req),
+    )
+
+    # Build a mapping from requirement_id to normalized_text for display
+    req_text_by_id: Dict[str, str] = {
+        req.id: req.normalized_text for req in requirements_result.solution_requirements
+    }
+
+    base_text = build_query.query_text or ""
+
+    rag_section_lines: List[str] = []
+    rag_section_lines.append("")
+    rag_section_lines.append("=" * 80)
+    rag_section_lines.append("RAG-SUPPORTED REQUIREMENTS (information already known from prior RFPs)")
+    rag_section_lines.append("=" * 80)
+    rag_section_lines.append("")
+
+    for req_id, rag_ctx in rag_contexts_by_req.items():
+        full_text = rag_ctx.strip()
+        req_text = req_text_by_id.get(req_id, "")
+        rag_section_lines.append(f"Requirement ID: {req_id}")
+        if req_text:
+            rag_section_lines.append(f"Requirement: {req_text}")
+        rag_section_lines.append("RAG Evidence:")
+        rag_section_lines.append(full_text if full_text else "[No RAG evidence text available]")
+        rag_section_lines.append("--- END RAG EVIDENCE ---")
+        rag_section_lines.append("")
+
+    enriched_text = base_text.rstrip() + "\n" + "\n".join(rag_section_lines)
+    build_query.query_text = enriched_text
+    return build_query
 
 
 def validate_before_generation(
@@ -320,6 +399,18 @@ async def process_rfp(file: UploadFile = File(...)) -> Dict[str, Any]:
 class RequirementsRequest(BaseModel):
     essential_text: str
 
+
+class UpdateScopeRequest(BaseModel):
+    """Manual edits to scoped text before confirmation."""
+    necessary_text: str
+    removed_text: str | None = None
+    rationale: str | None = None
+
+
+class UpdateRequirementsRequest(BaseModel):
+    """Manual edits to requirements before build-query."""
+    requirements: Dict[str, Any]
+
 @app.post("/run-requirements")
 async def run_requirements(req: RequirementsRequest) -> Dict[str, Any]:
     logger.info(
@@ -354,6 +445,46 @@ async def run_requirements(req: RequirementsRequest) -> Dict[str, Any]:
         len(result.response_structure_requirements),
     )
     return result.to_dict()
+
+
+@app.post("/update-scope")
+async def update_scope(req: UpdateScopeRequest) -> Dict[str, Any]:
+    """
+    Accept manually edited scope text before confirmation.
+    This does not re-run the scope agent; it simply persists the edited fields
+    in the same shape as ScopeResult for downstream steps.
+    """
+    logger.info(
+        "Update scope endpoint called (necessary_chars=%d)",
+        len(req.necessary_text),
+    )
+    scope = ScopeResult(
+        necessary_text=req.necessary_text,
+        removed_text=req.removed_text or "",
+        rationale=req.rationale or "Manually edited by user.",
+        cleaned_text=req.necessary_text,
+        comparison_agreement=True,
+        comparison_notes="Manually edited and accepted by user.",
+    )
+    return scope.to_dict()
+
+
+@app.post("/update-requirements")
+async def update_requirements(req: UpdateRequirementsRequest) -> Dict[str, Any]:
+    """
+    Accept manually edited requirements JSON before build-query.
+    """
+    logger.info("Update requirements endpoint called")
+    try:
+        # Validate structure using RequirementsResult
+        result = RequirementsResult(**req.requirements)
+        return result.to_dict()
+    except Exception as exc:
+        logger.exception("Update requirements failed: %s", exc)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid requirements payload: {str(exc)}",
+        ) from exc
 
 class BuildQueryRequest(BaseModel):
     extraction: Dict[str, Any]
@@ -1056,6 +1187,11 @@ class GenerateQuestionsRequest(BaseModel):
     build_query: Optional[Dict[str, Any]] = None
 
 
+class EnrichBuildQueryRequest(BaseModel):
+    build_query: Dict[str, Any]
+    session_id: Optional[str] = None
+
+
 @app.post("/generate-questions")
 async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str, Any]:
     """Generate questions for unknown information in build query or requirements."""
@@ -1069,6 +1205,8 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
         )
         
         company_kb = get_company_kb()
+        # Use RAG to avoid asking questions for information already present in prior RFPs
+        rag_system, _ = _setup_rag_and_kb(use_rag=True)
         
         # Priority: analyze build query if provided, otherwise fall back to requirements
         if req.build_query:
@@ -1079,11 +1217,18 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
             # Get requirements from the request if available
             if req.requirements:
                 requirements_result = RequirementsResult(**req.requirements)
-                questions_list = analyze_build_query_for_questions(
+                questions_list, rag_contexts_by_req = analyze_build_query_for_questions(
                     build_query_obj,
                     requirements_result,
                     company_kb,
                     max_questions_per_requirement=3,
+                    rag_system=rag_system,
+                )
+                # Enrich build query with RAG-supported information
+                enriched_build_query = _enrich_build_query_with_rag(
+                    build_query_obj,
+                    requirements_result,
+                    rag_contexts_by_req,
                 )
             else:
                 # Fallback: analyze build query as a whole (less ideal)
@@ -1117,19 +1262,24 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
             
             logger.info("Generated %d questions from build query", len(all_questions))
             
-            return {
+            response_payload: Dict[str, Any] = {
                 "questions": all_questions,
                 "questions_by_requirement": questions_by_req,
             }
+            # Include enriched build query if we had requirements (and thus RAG contexts)
+            if req.requirements:
+                response_payload["enriched_build_query"] = enriched_build_query.model_dump()
+            return response_payload
         elif req.requirements:
             logger.info("Analyzing requirements for questions (legacy mode)")
             requirements_result = RequirementsResult(**req.requirements)
             
-            # Generate questions for all solution requirements
+            # Generate questions for all solution requirements, using RAG to treat known info as answered
             questions_dict = analyze_requirements_for_questions(
                 requirements_result.solution_requirements,
                 company_kb,
                 max_questions_per_requirement=3,
+                rag_system=rag_system,
             )
             
             # Convert to list format for response
@@ -1228,7 +1378,7 @@ async def submit_answer(req: SubmitAnswerRequest) -> Dict[str, Any]:
     if not question:
         raise HTTPException(status_code=404, detail="Question not found")
     
-    # Create answer
+    # Create answer for the explicitly answered question
     answer = Answer(
         question_id=req.question_id,
         answer_text=req.answer_text,
@@ -1237,8 +1387,56 @@ async def submit_answer(req: SubmitAnswerRequest) -> Dict[str, Any]:
     context.answers.append(answer)
     question.answered = True
     
-    logger.info("Answer submitted for question %s in session %s", req.question_id, req.session_id)
-    return {"status": "ok", "answer": answer.model_dump()}
+    # Live-updating pipeline: infer which other open questions are now fully answered
+    remaining_questions = [q for q in context.questions if not q.answered]
+    auto_resolved_ids: list[str] = []
+    if remaining_questions:
+        try:
+            auto_resolved_ids = infer_answered_questions_from_answer(
+                answered_question=question,
+                answer_text=req.answer_text,
+                remaining_questions=remaining_questions,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to infer additionally answered questions for session %s: %s",
+                req.session_id,
+                exc,
+            )
+            auto_resolved_ids = []
+    
+    # Mark inferred questions as answered using the same answer text
+    for qid in auto_resolved_ids:
+        extra_q = next((q for q in context.questions if q.question_id == qid), None)
+        if extra_q and not extra_q.answered:
+            extra_answer = Answer(
+                question_id=qid,
+                answer_text=req.answer_text,
+                answered_at=datetime.now().isoformat(),
+            )
+            context.answers.append(extra_answer)
+            extra_q.answered = True
+    
+    if auto_resolved_ids:
+        logger.info(
+            "Answer to question %s in session %s also resolved %d other question(s): %s",
+            req.question_id,
+            req.session_id,
+            len(auto_resolved_ids),
+            auto_resolved_ids,
+        )
+    else:
+        logger.info(
+            "Answer submitted for question %s in session %s (no additional questions auto-resolved)",
+            req.question_id,
+            req.session_id,
+        )
+    
+    return {
+        "status": "ok",
+        "answer": answer.model_dump(),
+        "auto_resolved_question_ids": auto_resolved_ids,
+    }
 
 
 @app.get("/chat/session/{session_id}")
@@ -1256,6 +1454,49 @@ async def get_session(session_id: str) -> Dict[str, Any]:
         "created_at": context.created_at,
         "qa_context": context.get_qa_context(),
     }
+
+
+@app.post("/enrich-build-query")
+async def enrich_build_query_endpoint(req: EnrichBuildQueryRequest) -> Dict[str, Any]:
+    """
+    Enrich build query text with the latest Q&A context for a chat session.
+    This keeps build_query.query_text as the single, fully populated source of truth.
+    """
+    from backend.models import BuildQuery
+
+    try:
+        build_query = BuildQuery(**req.build_query)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid build_query payload: {str(exc)}",
+        ) from exc
+
+    qa_context = ""
+    if req.session_id and req.session_id in _conversation_sessions:
+        context = _conversation_sessions[req.session_id]
+        qa_context = context.get_qa_context()
+        logger.info(
+            "Enriching build query from session %s (answers=%d)",
+            req.session_id,
+            len(context.answers),
+        )
+    else:
+        logger.info("Enrich build query called without valid session_id; using original build query text only")
+
+    base_text = build_query.query_text or ""
+    marker = "USER-PROVIDED INFORMATION (from Q&A):"
+    idx = base_text.find(marker)
+    if idx != -1:
+        base_text = base_text[:idx].rstrip()
+
+    if qa_context:
+        enriched_text = f"{base_text.rstrip()}\n\n{qa_context}"
+    else:
+        enriched_text = base_text
+
+    build_query.query_text = enriched_text
+    return build_query.model_dump()
 
 
 # Response preview and editing endpoints

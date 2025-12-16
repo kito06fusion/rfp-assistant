@@ -31,7 +31,10 @@ class ScopeResult(BaseModel):
 
 class RequirementItem(BaseModel):
     id: str = Field(description="Machine-friendly identifier (e.g., 'SOL-ARCH-01')")
-    type: str = Field(description="Requirement type: 'mandatory', 'optional', or 'unspecified'")
+    type: str = Field(
+        default="unspecified",
+        description="Requirement type: 'mandatory', 'optional', or 'unspecified'",
+    )
     source_text: str = Field(description="Complete original text from the RFP document")
     normalized_text: str = Field(description="Concise, unambiguous restatement in clear English")
     category: str = Field(description="Category tag (e.g., 'Architecture', 'Security', 'SLA')")

@@ -4,8 +4,13 @@ import ChatInterface from './ChatInterface'
 import './ChatPanel.css'
 
 export default function ChatPanel() {
-  const { chatSessionId } = usePipeline()
+  const { chatSessionId, pipelineData, updatePipelineData } = usePipeline()
   const [isMinimized, setIsMinimized] = useState(false)
+
+  const handleBuildQueryUpdated = (updatedBuildQuery) => {
+    if (!updatedBuildQuery) return
+    updatePipelineData('buildQuery', updatedBuildQuery)
+  }
 
   // Only show if there's an active session
   if (!chatSessionId) {
@@ -39,6 +44,8 @@ export default function ChatPanel() {
           <ChatInterface 
             sessionId={chatSessionId} 
             onClose={null}
+            buildQuery={pipelineData.buildQuery}
+            onBuildQueryUpdated={handleBuildQueryUpdated}
           />
         </div>
       )}

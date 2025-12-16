@@ -1,16 +1,29 @@
 .card {
   background: radial-gradient(circle at top left, #020617, #020617 40%, #020617);
   border-radius: 0.75rem;
-  padding: 1.5rem;
+  padding: 1.25rem 1.25rem 1rem;
   border: 1px solid rgba(148, 163, 184, 0.15);
-  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.85);
-  margin-bottom: 1.5rem;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.7);
+  margin-bottom: 1.25rem;
 }
 
-.subheading {
-  font-size: 0.9rem;
-  color: #9ca3af;
-  margin-bottom: 0.5rem;
+.upload-card {
+  max-width: 640px;
+  margin-inline: auto;
+}
+
+.upload-header {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.upload-title {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
 }
 
 .upload-row {
@@ -18,28 +31,31 @@
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
+  margin-top: 0.5rem;
 }
 
-input[type="file"] {
+.upload-card input[type="file"] {
   color: #e5e7eb;
+  max-width: 280px;
+  font-size: 0.85rem;
 }
 
-button {
+.upload-card button {
   background: #2563eb;
   border: none;
   color: white;
-  padding: 0.6rem 1.2rem;
+  padding: 0.45rem 1rem;
   border-radius: 999px;
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   transition: background 0.2s;
 }
 
-button:hover:not(:disabled) {
+.upload-card button:hover:not(:disabled) {
   background: #1d4ed8;
 }
 
-button[disabled] {
+.upload-card button[disabled] {
   opacity: 0.6;
   cursor: not-allowed;
 }

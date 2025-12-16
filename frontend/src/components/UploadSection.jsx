@@ -49,18 +49,15 @@ export default function UploadSection() {
   }
 
   return (
-    <section className="card">
-      <div style={{ marginBottom: '1rem' }}>
-        <h2 style={{ margin: 0 }}>RFP Processing</h2>
-        <div className="subheading" style={{ marginTop: '0.25rem' }}>
-          Upload an RFP document and inspect each agent's view of the text.
-        </div>
+    <section className="card upload-card">
+      <div className="upload-header">
+        <h2 className="upload-title">Upload RFP</h2>
       </div>
       <div className="upload-row">
         <input
           id="file-input"
           type="file"
-          accept=".pdf,.doc,.docx"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.txt"
           onChange={handleFileChange}
           disabled={isProcessing}
         />
@@ -69,7 +66,7 @@ export default function UploadSection() {
           onClick={handleUpload}
           disabled={isProcessing || !file}
         >
-          Upload & process
+          {isProcessing ? 'Processing…' : 'Upload & process'}
         </button>
       </div>
       {status && (

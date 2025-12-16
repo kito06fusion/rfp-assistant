@@ -33,6 +33,11 @@ class RAGSystem:
         self.index: Optional[faiss.Index] = None
         self.metadata: List[Dict[str, Any]] = []
         self.client = None
+        logger.info(
+            "RAGSystem initialized (docs_folder=%s, index_path=%s)",
+            self.docs_folder,
+            self.index_path,
+        )
 
     def _get_embedding_client(self):
         """Get Azure OpenAI client specifically for embeddings (may have different config)."""
@@ -302,14 +307,18 @@ class RAGSystem:
         if not metadata_file.exists():
             raise FileNotFoundError(f"Metadata file not found: {metadata_file}")
 
-        logger.info("Loading index from: %s", index_file)
+        logger.info("RAG: Loading index from: %s", index_file)
         self.index = faiss.read_index(str(index_file))
 
         with open(metadata_file, "rb") as f:
             self.metadata = pickle.load(f)
 
-        logger.info("Loaded index with %d vectors and %d metadata entries", 
-                   self.index.ntotal, len(self.metadata))
+        logger.info(
+            "RAG: Loaded index with %d vectors and %d metadata entries (docs_folder=%s)",
+            self.index.ntotal,
+            len(self.metadata),
+            self.docs_folder,
+        )
 
     def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Search for similar documents with detailed logging."""

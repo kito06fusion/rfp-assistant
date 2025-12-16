@@ -43,6 +43,50 @@ export async function runRequirements(essentialText) {
 }
 
 /**
+ * Update scoped text after manual edits
+ */
+export async function updateScope(necessaryText, removedText = "", rationale = "") {
+  const response = await fetch(`${API_BASE}/update-scope`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      necessary_text: necessaryText,
+      removed_text: removedText,
+      rationale,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Update scope error ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Update requirements after manual edits
+ */
+export async function updateRequirements(requirements) {
+  const response = await fetch(`${API_BASE}/update-requirements`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ requirements }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Update requirements error ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  return await response.json();
+}
+
+/**
  * Build query from extraction and requirements
  */
 export async function buildQuery(extraction, requirements) {
@@ -276,5 +320,28 @@ export async function generatePDFFromPreview(previewId, extraction, requirements
     throw new Error(`${format.toUpperCase()} blob is empty`);
   }
   return { type: "blob", blob, format };
+}
+
+/**
+ * Enrich build query text with latest Q&A context for a chat session
+ */
+export async function enrichBuildQuery(buildQuery, sessionId = null) {
+  const response = await fetch(`${API_BASE}/enrich-build-query`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      build_query: buildQuery,
+      session_id: sessionId,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Enrich build query error ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  return await response.json();
 }
 

@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import List, Dict, Any, Optional
 
 from backend.llm.client import chat_completion
-from backend.models import RequirementItem
+from backend.models import RequirementItem, Question
+from backend.rag import RAGSystem
 from backend.knowledge_base.company_kb import CompanyKnowledgeBase
 
 logger = logging.getLogger(__name__)
@@ -65,10 +67,79 @@ For each question, provide:
 Output JSON with a list of questions."""
 
 
+def _build_rag_context_for_requirement(
+    requirement: RequirementItem,
+    rag_system: Optional[RAGSystem],
+    max_chunks: int = 3,
+) -> str:
+    """Retrieve RAG chunks relevant to this requirement for gap analysis."""
+    if rag_system is None:
+        return ""
+
+    try:
+        search_query = f"{requirement.normalized_text}\n{requirement.source_text}"
+        logger.info(
+            "Question agent: running RAG search for requirement %s (k=%d, query_len=%d)",
+            requirement.id,
+            max_chunks,
+            len(search_query),
+        )
+        results = rag_system.search(search_query, k=max_chunks)
+        logger.info(
+            "Question agent: RAG search for requirement %s returned %d chunk(s)",
+            requirement.id,
+            len(results),
+        )
+        if not results:
+            return ""
+
+        parts = [
+            "RAG CONTEXT (PRIOR RFP ANSWERS / KNOWLEDGE ALREADY AVAILABLE):",
+            "Use this ONLY to identify information that is ALREADY KNOWN so you DO NOT ask questions about it.",
+            "If a detail clearly appears here, treat it as known and do NOT generate a question for it.",
+            "",
+        ]
+        for i, r in enumerate(results, 1):
+            chunk = r.get("chunk_text", "")
+            if len(chunk) > 800:
+                chunk = chunk[:800] + "..."
+            parts.append(f"[RAG-{i}] {chunk}")
+        return "\n".join(parts)
+    except Exception as e:
+        logger.warning("RAG lookup for requirement %s failed: %s", requirement.id, e)
+        return ""
+
+
+def _is_question_covered_by_rag(question_text: str, rag_context: str) -> bool:
+    """
+    Heuristic check: does the RAG context already appear to contain the information
+    this question is asking for?
+    
+    We treat RAG as authoritative: if the overlap of content words is high enough,
+    we assume the question is already answered and should NOT be asked.
+    """
+    if not rag_context or not question_text:
+        return False
+
+    qt = question_text.lower()
+    rc = rag_context.lower()
+
+    # Extract content-ish words (length > 4) from the question
+    words = [w for w in re.findall(r"\w+", qt) if len(w) > 4]
+    if not words:
+        return False
+
+    overlap = sum(1 for w in words if w in rc)
+    # If at least 2 content words from the question appear in the RAG context,
+    # assume the question is already answered there.
+    return overlap >= 2
+
+
 def generate_questions(
     requirement: RequirementItem,
     all_requirements: List[RequirementItem],
     company_kb: CompanyKnowledgeBase,
+    rag_system: Optional[RAGSystem] = None,
 ) -> List[Dict[str, Any]]:
     """
     Generate questions for unknown information in a requirement.
@@ -86,9 +157,10 @@ def generate_questions(
         requirement.id,
     )
     
-    # Check what we know
+    # Check what we know from hardcoded KB and RAG
     known_topics = company_kb.get_all_known_topics()
     known_info_text = company_kb.format_for_prompt()
+    rag_context = _build_rag_context_for_requirement(requirement, rag_system)
     
     # Build context from all requirements
     all_req_text = "\n\n".join([
@@ -100,6 +172,9 @@ def generate_questions(
 
 KNOWN COMPANY INFORMATION (DO NOT ask about these):
 {known_info_text}
+
+RAG CONTEXT (PRIOR RFP ANSWERS - TREAT THESE AS KNOWN INFORMATION):
+{rag_context or "[No RAG context available for this requirement]"}
 
 REQUIREMENT TO ANALYZE:
 [{requirement.id}] {requirement.normalized_text}
@@ -166,7 +241,19 @@ If no questions are needed (all information is clear or in knowledge base), retu
                 if validated_q["question_text"]:
                     validated_questions.append(validated_q)
         
-        # Filter out questions about known topics
+        # Filter out questions where RAG already appears to contain the answer
+        rag_filtered_questions: List[Dict[str, Any]] = []
+        for q in validated_questions:
+            if rag_context and _is_question_covered_by_rag(q["question_text"], rag_context):
+                logger.info(
+                    "Question agent: skipping question for requirement %s because RAG already covers it: %s",
+                    requirement.id,
+                    q["question_text"][:150].replace("\n", " "),
+                )
+                continue
+            rag_filtered_questions.append(q)
+        
+        # Filter out questions about known topics (company KB)
         filtered_questions = []
         for q in validated_questions:
             question_text = q["question_text"].lower()
@@ -183,9 +270,10 @@ If no questions are needed (all information is clear or in knowledge base), retu
                 filtered_questions.append(q)
         
         logger.info(
-            "Question agent: generated %d questions (filtered from %d)",
+            "Question agent: generated %d questions (filtered from %d, rag_filtered=%d)",
             len(filtered_questions),
             len(validated_questions),
+            len(rag_filtered_questions),
         )
         
         return filtered_questions
@@ -201,7 +289,8 @@ def analyze_build_query_for_questions(
     requirements_result: RequirementsResult,
     company_kb: CompanyKnowledgeBase,
     max_questions_per_requirement: int = 3,
-) -> List[Dict[str, Any]]:
+    rag_system: Optional[RAGSystem] = None,
+) -> tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     Analyze each requirement individually and generate questions about missing information.
     
@@ -219,7 +308,8 @@ def analyze_build_query_for_questions(
     # Get company knowledge summary
     known_info_text = company_kb.format_for_prompt()
     
-    all_questions = []
+    all_questions: List[Dict[str, Any]] = []
+    rag_contexts_by_req: Dict[str, str] = {}
     
     # Analyze each solution requirement individually
     for req in requirements_result.solution_requirements:
@@ -232,6 +322,11 @@ def analyze_build_query_for_questions(
             if r.id != req.id
         ])
         
+        # Build RAG context for this requirement so the model can see what is already known
+        rag_context = _build_rag_context_for_requirement(req, rag_system)
+        if rag_context:
+            rag_contexts_by_req[req.id] = rag_context
+
         user_prompt = f"""Analyze this RFP requirement and identify what information the VENDOR needs to provide about THEIR SOLUTION to create a complete response.
 
 REQUIREMENT TO ANALYZE:
@@ -249,6 +344,12 @@ RESPONSE STRUCTURE REQUIREMENTS (how to format the response):
 
 KNOWN COMPANY INFORMATION (DO NOT ask about these):
 {known_info_text}
+
+RAG CONTEXT (PRIOR RFP ANSWERS / KNOWLEDGE ALREADY AVAILABLE):
+{rag_context or "[No RAG context available for this requirement]"}
+
+RAG CONTEXT (PRIOR RFP ANSWERS / KNOWLEDGE ALREADY AVAILABLE):
+{rag_context or "[No RAG context available for this requirement]"}
 
 TASK:
 You are helping a VENDOR create a response to this RFP requirement. The requirement is clear - it specifies what the buyer needs.
@@ -317,11 +418,19 @@ If all information needed to answer this requirement is already available in the
                 logger.debug("Response was: %s", response[:500])
                 continue
             
-            # Validate and add requirement_id to each question
+            # Validate, apply RAG-based filtering, and add requirement_id to each question
             for q in questions:
                 if isinstance(q, dict) and "question_text" in q:
+                    q_text = q.get("question_text", "")
+                    if rag_context and _is_question_covered_by_rag(q_text, rag_context):
+                        logger.info(
+                            "Question agent (build_query): skipping question for requirement %s because RAG already covers it: %s",
+                            req.id,
+                            q_text[:150].replace("\n", " "),
+                        )
+                        continue
                     validated_q = {
-                        "question_text": q.get("question_text", ""),
+                        "question_text": q_text,
                         "context": q.get("context", ""),
                         "category": q.get("category", "general"),
                         "priority": q.get("priority", "medium"),
@@ -383,7 +492,7 @@ If all information needed to answer this requirement is already available in the
         len(all_questions),
     )
     
-    return filtered_questions
+    return filtered_questions, rag_contexts_by_req
 
 
 def analyze_build_query_for_questions_legacy(
@@ -498,6 +607,7 @@ def analyze_requirements_for_questions(
     requirements: List[RequirementItem],
     company_kb: CompanyKnowledgeBase,
     max_questions_per_requirement: int = 3,
+    rag_system: Optional[RAGSystem] = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     Analyze multiple requirements and generate questions for each.
@@ -513,7 +623,7 @@ def analyze_requirements_for_questions(
     all_questions = {}
     
     for req in requirements:
-        questions = generate_questions(req, requirements, company_kb)
+        questions = generate_questions(req, requirements, company_kb, rag_system=rag_system)
         # Limit questions per requirement
         questions = questions[:max_questions_per_requirement]
         # Sort by priority (high first)
@@ -529,4 +639,115 @@ def analyze_requirements_for_questions(
     )
     
     return all_questions
+
+
+def infer_answered_questions_from_answer(
+    answered_question: Question,
+    answer_text: str,
+    remaining_questions: List[Question],
+) -> List[str]:
+    """
+    Given a newly answered question and its answer, infer which of the remaining
+    questions are now fully answered by the same answer.
+
+    Returns a list of question_id values that can be marked as answered.
+    """
+    if not remaining_questions or not answer_text.strip():
+        return []
+
+    logger.info(
+        "Inferring additionally answered questions from answer to %s (remaining=%d)",
+        answered_question.question_id,
+        len(remaining_questions),
+    )
+
+    remaining_block = "\n".join(
+        f"- ID: {q.question_id}\n  Text: {q.question_text}"
+        for q in remaining_questions
+    )
+
+    system_prompt = (
+        "You are helping to minimize redundant clarification questions for an RFP.\n"
+        "When the vendor has answered one question, you check if that same answer "
+        "also fully answers other pending questions.\n"
+        "Only mark a question as answered if the provided answer gives a complete, "
+        "usable answer for that question as written.\n"
+        "If an answer only partially overlaps or you would still want a separate, "
+        "focused answer, then DO NOT mark that question as answered."
+    )
+
+    user_prompt = f"""You are given:
+
+1) The question that the vendor just answered
+2) The vendor's answer text
+3) A list of remaining open questions
+
+Your task:
+- Decide which of the remaining questions are now fully answered by the same answer text.
+- Only select questions where, if you were the RFP author, you would accept that existing answer as a complete answer to that question.
+- If a question would still benefit from its own specific answer, do NOT select it.
+
+Return a JSON array of question_id strings. Example:
+["REQ-01-q-0", "REQ-03-q-1"]
+
+If none of the remaining questions are fully answered, return an empty array [].
+
+JUST-ANSWERED QUESTION:
+ID: {answered_question.question_id}
+Text: {answered_question.question_text}
+
+ANSWER TEXT:
+{answer_text}
+
+REMAINING OPEN QUESTIONS:
+{remaining_block}
+"""
+
+    try:
+        content = chat_completion(
+            model=QUESTION_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.0,
+            max_tokens=300,
+        )
+
+        cleaned = content.replace("```json", "").replace("```", "").strip()
+        try:
+            result = json.loads(cleaned)
+        except json.JSONDecodeError:
+            import re
+
+            array_match = re.search(r"\[.*\]", cleaned, re.DOTALL)
+            if array_match:
+                result = json.loads(array_match.group(0))
+            else:
+                logger.warning(
+                    "Could not parse inferred answered questions JSON, returning empty list"
+                )
+                return []
+
+        if not isinstance(result, list):
+            logger.warning(
+                "Inferred answered questions result was not a list, got %s", type(result)
+            )
+            return []
+
+        # Keep only IDs that correspond to actually remaining questions
+        remaining_ids = {q.question_id for q in remaining_questions}
+        inferred_ids = [
+            qid for qid in result if isinstance(qid, str) and qid in remaining_ids
+        ]
+
+        logger.info(
+            "Inferred %d additionally answered questions from LLM",
+            len(inferred_ids),
+        )
+        return inferred_ids
+    except Exception as e:
+        logger.error("Inference of additionally answered questions failed: %s", e)
+        logger.exception("Full traceback:")
+        return []
 

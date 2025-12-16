@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { usePipeline } from '../context/PipelineContext'
-import { runRequirements, buildQuery, generateResponse, generateQuestions, createChatSession, addQuestionsToSession, previewResponses, updateResponse, generatePDFFromPreview } from '../services/api'
+import { runRequirements, buildQuery, generateResponse, generateQuestions, createChatSession, addQuestionsToSession, previewResponses, updateResponse, generatePDFFromPreview, updateScope, updateRequirements } from '../services/api'
 import StatusPill from './StatusPill'
 import OutputDisplay from './OutputDisplay'
 import CheckboxControl from './CheckboxControl'
@@ -64,12 +64,18 @@ export default function AgentPanel({ agentId }) {
     setActiveTab,
     chatSessionId,
     setChatSessionId,
+    editable,
+    updateEditable,
   } = usePipeline()
 
   const [summary, setSummary] = useState('')
   const [showChat, setShowChat] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [previewData, setPreviewData] = useState(null)
+  const [scopeDraft, setScopeDraft] = useState('')
+  const [requirementsDraft, setRequirementsDraft] = useState('')
+  const [buildQueryDraft, setBuildQueryDraft] = useState('')
+  const [questionsGenerated, setQuestionsGenerated] = useState(false)
   
   // Auto-show chat when viewing requirements panel if session exists
   useEffect(() => {
@@ -99,37 +105,9 @@ export default function AgentPanel({ agentId }) {
       const buildQueryData = await buildQuery(pipelineData.extraction, pipelineData.requirements)
       updatePipelineData('buildQuery', buildQueryData)
       updateStatus('build-query', 'complete')
-      setSummary('Query built. You can confirm and proceed while questions are being generated...')
+      setSummary('Query built. Review and edit if needed, then confirm to generate questions.')
       setActiveTab('build-query')
-      
-      // Generate questions based on build query (non-blocking - user can confirm build query while this runs)
-      // Fire and forget - questions will appear in chat panel when ready
-      generateQuestions(pipelineData.requirements, buildQueryData)
-        .then((questionsData) => {
-          console.log('Questions generated from build query:', questionsData)
-          if (questionsData.questions && questionsData.questions.length > 0) {
-            console.log(`Found ${questionsData.questions.length} questions, creating chat session...`)
-            return createChatSession()
-              .then((sessionData) => {
-                return addQuestionsToSession(sessionData.session_id, questionsData.questions)
-                  .then(() => {
-                    setChatSessionId(sessionData.session_id)
-                    setSummary(`Query built. ${questionsData.questions.length} question(s) available in chat panel.`)
-                    console.log('Chat session created:', sessionData.session_id)
-                    // Show subtle notification (no alert that blocks)
-                    console.log(`Generated ${questionsData.questions.length} question(s). Check the chat panel on the right.`)
-                  })
-              })
-          } else {
-            console.log('No questions generated (all information is clear or in knowledge base)')
-            setSummary('Query built. No additional questions needed.')
-          }
-        })
-        .catch((qErr) => {
-          console.error('Failed to generate questions:', qErr)
-          setSummary('Query built. (Question generation failed - you can still proceed)')
-          // Don't fail build query if questions fail
-        })
+      setQuestionsGenerated(false)
     } catch (err) {
       console.error(err)
       updateStatus('build-query', 'error')
@@ -406,7 +384,7 @@ export default function AgentPanel({ agentId }) {
         }
         return 'Processing...'
       case 'build-query':
-        return pipelineData.buildQuery ? 'Query built. Please review and confirm.' : 'Waiting...'
+        return pipelineData.buildQuery ? 'Query built. Please review, edit if needed, and confirm to generate questions.' : 'Waiting...'
       case 'response':
         if (pipelineData.response) {
           return pipelineData.response.type === 'pdf' 
@@ -422,6 +400,113 @@ export default function AgentPanel({ agentId }) {
   const status = statuses[agentId] || 'waiting'
   const content = getContent()
   const summaryText = getSummaryText()
+  
+  // Run question generation once, without marking final confirmation
+  const handleGenerateQuestionsOnce = async () => {
+    if (!pipelineData.buildQuery || !pipelineData.requirements || questionsGenerated) {
+      return
+    }
+
+    try {
+      const questionsData = await generateQuestions(pipelineData.requirements, pipelineData.buildQuery)
+      console.log('Questions generated from build query:', questionsData)
+
+      // Update build query with any RAG-supported information from backend
+      if (questionsData.enriched_build_query) {
+        updatePipelineData('buildQuery', questionsData.enriched_build_query)
+      }
+
+      if (questionsData.questions && questionsData.questions.length > 0) {
+        console.log(`Found ${questionsData.questions.length} questions, creating chat session...`)
+        const sessionData = await createChatSession()
+        await addQuestionsToSession(sessionData.session_id, questionsData.questions)
+        setChatSessionId(sessionData.session_id)
+        setSummary(`Query confirmed. ${questionsData.questions.length} question(s) available in chat panel.`)
+        console.log('Chat session created:', sessionData.session_id)
+        console.log(`Generated ${questionsData.questions.length} question(s). Check the chat panel on the right.`)
+      } else {
+        console.log('No questions generated (all information is clear in knowledge base / RAG)')
+        setSummary('Query confirmed. No additional questions needed.')
+      }
+    } catch (qErr) {
+      console.error('Failed to generate questions:', qErr)
+      setSummary('Query confirmed. (Question generation failed - you can still proceed)')
+    } finally {
+      setQuestionsGenerated(true)
+    }
+  }
+
+  const handleToggleScopeEdit = () => {
+    if (!pipelineData.scope) return
+    const initial = pipelineData.scope.necessary_text || ''
+    setScopeDraft(initial)
+    updateEditable('scope', !editable.scope)
+  }
+
+  const handleSaveScope = async () => {
+    try {
+      updateStatus('scope', 'processing')
+      const updated = await updateScope(
+        scopeDraft,
+        pipelineData.scope?.removed_text || '',
+        pipelineData.scope?.rationale || 'Manually edited by user.'
+      )
+      updatePipelineData('scope', updated)
+      updateStatus('scope', 'complete')
+      updateEditable('scope', false)
+    } catch (err) {
+      console.error('Failed to update scope:', err)
+      alert(`Failed to update scope: ${err.message}`)
+      updateStatus('scope', 'error')
+    }
+  }
+
+  const handleToggleRequirementsEdit = () => {
+    if (!pipelineData.requirements) return
+    setRequirementsDraft(JSON.stringify(pipelineData.requirements, null, 2))
+    updateEditable('requirements', !editable.requirements)
+  }
+
+  const handleSaveRequirements = async () => {
+    try {
+      let parsed
+      try {
+        parsed = JSON.parse(requirementsDraft)
+      } catch (e) {
+        alert('Requirements JSON is invalid. Please fix the syntax before saving.')
+        return
+      }
+      updateStatus('requirements', 'processing')
+      const updated = await updateRequirements(parsed)
+      updatePipelineData('requirements', updated)
+      updateStatus('requirements', 'complete')
+      updateEditable('requirements', false)
+    } catch (err) {
+      console.error('Failed to update requirements:', err)
+      alert(`Failed to update requirements: ${err.message}`)
+      updateStatus('requirements', 'error')
+    }
+  }
+
+  const handleToggleBuildQueryEdit = () => {
+    if (!pipelineData.buildQuery?.query_text) return
+    setBuildQueryDraft(pipelineData.buildQuery.query_text)
+    updateEditable('buildQuery', !editable.buildQuery)
+  }
+
+  const handleSaveBuildQuery = () => {
+    if (!pipelineData.buildQuery) return
+    // Update build query text locally; no backend call needed
+    updatePipelineData('buildQuery', {
+      ...pipelineData.buildQuery,
+      query_text: buildQueryDraft,
+    })
+    // Reset confirmation and questions so they are regenerated for the edited query
+    updateConfirmation('buildQueryConfirmed', false)
+    setQuestionsGenerated(false)
+    updateEditable('buildQuery', false)
+    setSummary('Build query updated. Please confirm again to generate questions.')
+  }
 
   return (
     <div className="agent-panel">
@@ -448,16 +533,95 @@ export default function AgentPanel({ agentId }) {
       {config.badge && (
         <div className="badge">{config.badge}</div>
       )}
+     
+      {/* Scope / Requirements / Build Query editable views */}
+      {agentId === 'scope' && editable.scope && pipelineData.scope ? (
+        <div className="editable-section">
+          <label className="edit-label">
+            Edit scoped text before confirming:
+          </label>
+          <textarea
+            className="edit-textarea"
+            value={scopeDraft}
+            onChange={(e) => setScopeDraft(e.target.value)}
+            rows={16}
+          />
+          <div className="edit-actions">
+            <Button onClick={handleSaveScope} disabled={status === 'processing'}>
+              Save scoped text
+            </Button>
+            <Button variant="secondary" onClick={handleToggleScopeEdit}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : agentId === 'requirements' && editable.requirements && pipelineData.requirements ? (
+        <div className="editable-section">
+          <label className="edit-label">
+            Edit requirements JSON before building query:
+          </label>
+          <textarea
+            className="edit-textarea"
+            value={requirementsDraft}
+            onChange={(e) => setRequirementsDraft(e.target.value)}
+            rows={20}
+          />
+          <div className="edit-actions">
+            <Button onClick={handleSaveRequirements} disabled={status === 'processing'}>
+              Save requirements
+            </Button>
+            <Button variant="secondary" onClick={handleToggleRequirementsEdit}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : agentId === 'build-query' && editable.buildQuery && pipelineData.buildQuery ? (
+        <div className="editable-section">
+          <label className="edit-label">
+            Edit build query before confirming:
+          </label>
+          <textarea
+            className="edit-textarea"
+            value={buildQueryDraft}
+            onChange={(e) => setBuildQueryDraft(e.target.value)}
+            rows={16}
+          />
+          <div className="edit-actions">
+            <Button onClick={handleSaveBuildQuery} disabled={status === 'processing'}>
+              Save build query
+            </Button>
+            <Button variant="secondary" onClick={handleToggleBuildQueryEdit}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <OutputDisplay content={content} />
+      )}
       
-      <OutputDisplay content={content} />
+      {config.showAccept && agentId === 'scope' && pipelineData.scope && (
+        <div className="accept-row scope-accept-row">
+          <div className="scope-accept-text">
+            <div className="scope-accept-title">Scoped text review</div>
+            <div className="scope-accept-subtitle">
+              Confirm when you’re happy with the cleaned RFP text. Requirements will be generated from this version.
+            </div>
+          </div>
+          <Button
+            onClick={() => updateConfirmation('scopeAccepted', !confirmations.scopeAccepted)}
+            className={`scope-accept-button ${confirmations.scopeAccepted ? 'accepted' : ''}`}
+          >
+            {confirmations.scopeAccepted ? '✓ Scope accepted' : 'Accept scoped text'}
+          </Button>
+        </div>
+      )}
       
-      {config.showAccept && agentId === 'scope' && (
-        <CheckboxControl
-          id="accept-scope"
-          label="I accept this scoped text"
-          checked={confirmations.scopeAccepted}
-          onChange={(checked) => updateConfirmation('scopeAccepted', checked)}
-        />
+      {agentId === 'scope' && pipelineData.scope && (
+        <div className="accept-row" style={{ marginTop: '0.5rem' }}>
+          <Button onClick={handleToggleScopeEdit}>
+            {editable.scope ? 'Close editor' : 'Edit scoped text'}
+          </Button>
+        </div>
       )}
       
       {config.showBuildQuery && agentId === 'requirements' && confirmations.scopeAccepted && pipelineData.requirements && (
@@ -474,22 +638,55 @@ export default function AgentPanel({ agentId }) {
               ⚠️ <strong>Questions available below!</strong> Please answer them before building the query to improve response quality.
             </div>
           )}
-          <Button onClick={handleBuildQuery} disabled={status === 'processing'}>
+          <Button onClick={handleBuildQuery} disabled={status === 'processing' || editable.requirements}>
             Build Query
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={handleToggleRequirementsEdit}
+            style={{ marginLeft: '0.5rem' }}
+          >
+            {editable.requirements ? 'Close editor' : 'Edit requirements JSON'}
           </Button>
         </div>
       )}
       
-      {config.showConfirm && agentId === 'build-query' && pipelineData.buildQuery && (
-        <CheckboxControl
-          id="confirm-build-query"
-          label="I confirm this build query"
-          checked={confirmations.buildQueryConfirmed}
-          onChange={(checked) => updateConfirmation('buildQueryConfirmed', checked)}
-        />
+      {agentId === 'build-query' && pipelineData.buildQuery && (
+        <>
+          {!questionsGenerated && (
+            <div className="accept-row" style={{ marginTop: '0.5rem' }}>
+              <Button onClick={handleGenerateQuestionsOnce} disabled={status === 'processing'}>
+                Confirm & generate questions
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={handleToggleBuildQueryEdit}
+              >
+                {editable.buildQuery ? 'Close editor' : 'Edit build query'}
+              </Button>
+            </div>
+          )}
+
+          {questionsGenerated && (
+            <div className="accept-row" style={{ marginTop: '0.5rem' }}>
+              <CheckboxControl
+                id="confirm-build-query-final"
+                label="I confirm this final build query"
+                checked={confirmations.buildQueryConfirmed}
+                onChange={(checked) => updateConfirmation('buildQueryConfirmed', checked)}
+              />
+              <Button
+                variant="secondary"
+                onClick={handleToggleBuildQueryEdit}
+              >
+                {editable.buildQuery ? 'Close editor' : 'Edit build query'}
+              </Button>
+            </div>
+          )}
+        </>
       )}
       
-      {config.showGenerate && agentId === 'build-query' && confirmations.buildQueryConfirmed && (
+      {config.showGenerate && agentId === 'build-query' && confirmations.buildQueryConfirmed && questionsGenerated && (
         <div className="accept-row" style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
           <Button onClick={handlePreviewResponses} disabled={status === 'processing'}>
             Preview Responses

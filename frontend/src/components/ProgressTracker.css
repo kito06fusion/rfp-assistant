@@ -107,7 +107,6 @@
   background: rgba(37, 99, 235, 0.2);
   border-color: #2563eb;
   color: #60a5fa;
-  animation: spin 2s linear infinite;
 }
 
 .progress-step-complete .step-indicator {
@@ -133,7 +132,12 @@
 }
 
 .step-spinner {
-  font-size: 1.2rem;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(96, 165, 250, 0.4);
+  border-top-color: #60a5fa;
+  animation: spin 0.8s linear infinite;
 }
 
 .step-error {

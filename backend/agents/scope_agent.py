@@ -18,7 +18,10 @@ COMPARISON_MODEL = "gpt-5-chat"
 SCOPE_SYSTEM_PROMPT = """Extract necessary RFP text (80-95% of original).
 
 Keep: requirements, scope, objectives, evaluation criteria, structure requirements.
-Remove: emails, addresses, phone numbers, contact names, signatures, metadata, headers/footers, legal boilerplate, placeholder dates like [DD Month YYYY], "Rights of the Ministry/Buyer/Company" sections.
+Remove: emails, addresses, phone numbers, contact names, signatures, metadata, headers/footers, legal boilerplate, placeholder dates like [DD Month YYYY].
+
+IMPORTANT EXCEPTION:
+- DO NOT remove any clauses describing the rights or remedies of the Ministry/Buyer/Authority (e.g. "Rights of the Ministry", "Rights of the Buyer", termination rights, penalties, audit rights, inspection rights). These are part of the commercial terms and MUST be kept in the necessary_text.
 
 CRITICAL: The removed_text field MUST contain the ACTUAL removed text content (not just a description). List each removed section verbatim, separated by '---REMOVED SECTION---'.
 
@@ -103,8 +106,9 @@ REMOVE and list in removed_text:
 - Page headers/footers
 - Copyright notices
 - Legal boilerplate sections
-- "Rights of the Ministry/Buyer/Company" sections (standard procurement rights clauses)
 - Document metadata
+
+IMPORTANT: Do NOT remove or exclude any clauses describing the rights or remedies of the Ministry, Buyer, Contracting Authority, or similar entities. These rights clauses are important commercial terms and MUST remain in necessary_text, not in removed_text.
 
 KEEP in necessary_text:
 - All requirements, scope, objectives, evaluation criteria

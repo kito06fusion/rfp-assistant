@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react'
 import './ChatInterface.css'
+import { enrichBuildQuery } from '../services/api'
 
 const API_BASE = "http://127.0.0.1:8001"
 
-export default function ChatInterface({ sessionId, onClose }) {
+export default function ChatInterface({ sessionId, onClose, buildQuery, onBuildQueryUpdated }) {
   const [conversation, setConversation] = useState([]) // Q&A pairs in order
   const [allQuestions, setAllQuestions] = useState([]) // All questions from session
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
@@ -118,6 +119,16 @@ export default function ChatInterface({ sessionId, onClose }) {
         
         // Reload session to get updated state
         await loadSession()
+
+        // Enrich build query with latest Q&A so the build query view stays in sync
+        if (buildQuery && onBuildQueryUpdated) {
+          try {
+            const updated = await enrichBuildQuery(buildQuery, sessionId)
+            onBuildQueryUpdated(updated)
+          } catch (e) {
+            console.error('Failed to enrich build query:', e)
+          }
+        }
       } else {
         const errorText = await response.text()
         alert(`Failed to submit answer: ${errorText}`)

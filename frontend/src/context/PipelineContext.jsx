@@ -33,6 +33,11 @@ export function PipelineProvider({ children }) {
     scopeAccepted: false,
     buildQueryConfirmed: false,
   })
+  const [editable, setEditable] = useState({
+    scope: false,
+    requirements: false,
+    buildQuery: false,
+  })
   
   const [chatSessionId, setChatSessionId] = useState(null)
 
@@ -46,6 +51,10 @@ export function PipelineProvider({ children }) {
 
   const updateConfirmation = useCallback((key, value) => {
     setConfirmations(prev => ({ ...prev, [key]: value }))
+  }, [])
+
+  const updateEditable = useCallback((key, value) => {
+    setEditable(prev => ({ ...prev, [key]: value }))
   }, [])
 
   const resetPipeline = useCallback(() => {
@@ -68,6 +77,11 @@ export function PipelineProvider({ children }) {
       scopeAccepted: false,
       buildQueryConfirmed: false,
     })
+    setEditable({
+      scope: false,
+      requirements: false,
+      buildQuery: false,
+    })
     setChatSessionId(null)
     setActiveTab('ocr')
   }, [])
@@ -83,6 +97,8 @@ export function PipelineProvider({ children }) {
         updateStatus,
         confirmations,
         updateConfirmation,
+        editable,
+        updateEditable,
         resetPipeline,
         chatSessionId,
         setChatSessionId,

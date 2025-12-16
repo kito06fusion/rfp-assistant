@@ -26,6 +26,7 @@ RUN pip install --upgrade pip && \
 COPY backend backend
 COPY frontend frontend
 COPY image.png image.png
+COPY docs ./docs
 
 EXPOSE 8001
 
