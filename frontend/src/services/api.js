@@ -1,8 +1,6 @@
-const API_BASE = "http://127.0.0.1:8001";
+const API_BASE =
+  import.meta.env.VITE_API_URL || "http://127.0.0.1:8001";
 
-/**
- * Process RFP file upload
- */
 export async function processRFP(file) {
   const formData = new FormData();
   formData.append("file", file);
@@ -20,9 +18,6 @@ export async function processRFP(file) {
   return await response.json();
 }
 
-/**
- * Run requirements agent
- */
 export async function runRequirements(essentialText) {
   const response = await fetch(`${API_BASE}/run-requirements`, {
     method: "POST",
@@ -42,9 +37,6 @@ export async function runRequirements(essentialText) {
   return await response.json();
 }
 
-/**
- * Update scoped text after manual edits
- */
 export async function updateScope(necessaryText, removedText = "", rationale = "") {
   const response = await fetch(`${API_BASE}/update-scope`, {
     method: "POST",
@@ -66,9 +58,6 @@ export async function updateScope(necessaryText, removedText = "", rationale = "
   return await response.json();
 }
 
-/**
- * Update requirements after manual edits
- */
 export async function updateRequirements(requirements) {
   const response = await fetch(`${API_BASE}/update-requirements`, {
     method: "POST",
@@ -86,9 +75,6 @@ export async function updateRequirements(requirements) {
   return await response.json();
 }
 
-/**
- * Build query from extraction and requirements
- */
 export async function buildQuery(extraction, requirements) {
   const response = await fetch(`${API_BASE}/build-query`, {
     method: "POST",
@@ -109,9 +95,6 @@ export async function buildQuery(extraction, requirements) {
   return await response.json();
 }
 
-/**
- * Generate RFP response
- */
 export async function generateResponse(extraction, requirements, options = {}) {
   const { use_rag = true, num_retrieval_chunks = 5, session_id = null } = options;
 
@@ -156,7 +139,6 @@ export async function generateQuestions(requirements = null, buildQuery = null) 
   const body = {};
   if (buildQuery) {
     body.build_query = buildQuery;
-    // Include requirements if available for better per-requirement analysis
     if (requirements) {
       body.requirements = requirements;
     }
@@ -182,9 +164,6 @@ export async function generateQuestions(requirements = null, buildQuery = null) 
   return await response.json();
 }
 
-/**
- * Create chat session
- */
 export async function createChatSession(requirementId = null) {
   const response = await fetch(`${API_BASE}/chat/session`, {
     method: "POST",
@@ -202,9 +181,6 @@ export async function createChatSession(requirementId = null) {
   return await response.json();
 }
 
-/**
- * Add questions to session
- */
 export async function addQuestionsToSession(sessionId, questions) {
   const response = await fetch(`${API_BASE}/chat/questions`, {
     method: "POST",
@@ -225,9 +201,6 @@ export async function addQuestionsToSession(sessionId, questions) {
   return await response.json();
 }
 
-/**
- * Get session details
- */
 export async function getSession(sessionId) {
   const response = await fetch(`${API_BASE}/chat/session/${sessionId}`);
 
@@ -239,9 +212,6 @@ export async function getSession(sessionId) {
   return await response.json();
 }
 
-/**
- * Preview responses (generate without PDF)
- */
 export async function previewResponses(extraction, requirements, options = {}) {
   const { use_rag = true, num_retrieval_chunks = 5, session_id = null } = options;
 
@@ -267,9 +237,6 @@ export async function previewResponses(extraction, requirements, options = {}) {
   return await response.json();
 }
 
-/**
- * Update a response in preview
- */
 export async function updateResponse(previewId, requirementId, responseText) {
   const response = await fetch(`${API_BASE}/update-response`, {
     method: "POST",
@@ -291,9 +258,6 @@ export async function updateResponse(previewId, requirementId, responseText) {
   return await response.json();
 }
 
-/**
- * Generate document from preview (PDF, DOCX, or Markdown)
- */
 export async function generatePDFFromPreview(previewId, extraction, requirements, format = 'pdf') {
   const response = await fetch(`${API_BASE}/generate-pdf-from-preview`, {
     method: "POST",
@@ -322,9 +286,6 @@ export async function generatePDFFromPreview(previewId, extraction, requirements
   return { type: "blob", blob, format };
 }
 
-/**
- * Enrich build query text with latest Q&A context for a chat session
- */
 export async function enrichBuildQuery(buildQuery, sessionId = null) {
   const response = await fetch(`${API_BASE}/enrich-build-query`, {
     method: "POST",

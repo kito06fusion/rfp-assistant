@@ -1,12 +1,3 @@
-.card {
-  background: radial-gradient(circle at top left, #020617, #020617 40%, #020617);
-  border-radius: 0.75rem;
-  padding: 1.25rem 1.25rem 1rem;
-  border: 1px solid rgba(148, 163, 184, 0.15);
-  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.7);
-  margin-bottom: 1.25rem;
-}
-
 .upload-card {
   max-width: 640px;
   margin-inline: auto;
@@ -22,14 +13,16 @@
 
 .upload-title {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 0.98rem;
   letter-spacing: 0.02em;
+  color: var(--text-muted);
+  text-transform: uppercase;
 }
 
 .upload-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.85rem;
   align-items: center;
   margin-top: 0.5rem;
 }
@@ -37,27 +30,54 @@
 .upload-card input[type="file"] {
   color: #e5e7eb;
   max-width: 280px;
-  font-size: 0.85rem;
+  font-size: 0.86rem;
+}
+
+.upload-card input[type="file"]::-webkit-file-upload-button {
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  color: var(--text-muted);
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-size: 0.82rem;
+  margin-right: 0.6rem;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform 120ms ease-out;
+}
+
+.upload-card input[type="file"]::-webkit-file-upload-button:hover {
+  background: rgba(15, 23, 42, 1);
+  border-color: rgba(148, 163, 184, 0.7);
+  color: var(--text-primary);
+  transform: translateY(-0.5px);
 }
 
 .upload-card button {
-  background: #2563eb;
-  border: none;
+  background: linear-gradient(135deg, #2563eb, #3b82f6);
+  border: 1px solid rgba(56, 189, 248, 0.55);
   color: white;
-  padding: 0.45rem 1rem;
-  border-radius: 999px;
+  padding: 0.5rem 1.2rem;
+  border-radius: var(--radius-pill);
   cursor: pointer;
-  font-size: 0.85rem;
-  transition: background 0.2s;
+  font-size: 0.86rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  transition: background var(--transition-med), box-shadow var(--transition-med), transform var(--transition-fast), border-color var(--transition-fast);
+  box-shadow: 0 10px 25px rgba(37, 99, 235, 0.55);
 }
 
 .upload-card button:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+  border-color: rgba(56, 189, 248, 0.8);
+  box-shadow: 0 16px 35px rgba(37, 99, 235, 0.78), var(--accent-glow);
+  transform: translateY(-1px);
 }
 
 .upload-card button[disabled] {
   opacity: 0.6;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .status {

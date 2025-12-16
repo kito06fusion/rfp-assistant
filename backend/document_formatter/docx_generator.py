@@ -32,19 +32,6 @@ def generate_rfp_docx(
     rfp_title: Optional[str] = None,
     output_path: Optional[Path] = None,
 ) -> bytes:
-    """
-    Generate a DOCX document from RFP responses.
-    
-    Args:
-        individual_responses: List of individual requirement responses
-        requirements_result: RequirementsResult containing all requirements
-        extraction_result: ExtractionResult with RFP metadata
-        rfp_title: Optional title for the RFP
-        output_path: Optional path to save DOCX (if None, returns bytes)
-    
-    Returns:
-        DOCX bytes if output_path is None, otherwise writes to file
-    """
     if not DOCX_AVAILABLE:
         raise ImportError("python-docx is not installed. Install it with: pip install python-docx")
     
@@ -52,13 +39,11 @@ def generate_rfp_docx(
     
     doc = Document()
     
-    # Set default font
     style = doc.styles['Normal']
     font = style.font
     font.name = 'Calibri'
     font.size = Pt(11)
     
-    # Title page
     title_para = doc.add_heading(rfp_title or f"RFP Response - {extraction_result.language.upper()}", 0)
     title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
@@ -73,7 +58,6 @@ def generate_rfp_docx(
     
     doc.add_page_break()
     
-    # Table of Contents
     doc.add_heading("Table of Contents", 1)
     toc_para = doc.add_paragraph()
     for idx, resp in enumerate(individual_responses, 1):
@@ -81,30 +65,24 @@ def generate_rfp_docx(
     
     doc.add_page_break()
     
-    # Company Overview
     doc.add_heading("Company Overview", 1)
     overview_text = """fusionAIx is a specialized low-code and AI-driven digital transformation partner focused on modernizing enterprise workflows, improving customer/employee experiences, and accelerating delivery through platform-led automation."""
     doc.add_paragraph(overview_text)
     
     doc.add_page_break()
     
-    # Solution Requirement Responses
     doc.add_heading("Solution Requirement Responses", 1)
     
     for idx, resp_data in enumerate(individual_responses, 1):
-        # Requirement header
         req_heading = doc.add_heading(f"Requirement {idx}: {resp_data.get('requirement_id', 'N/A')}", 2)
         
-        # Requirement text
         req_para = doc.add_paragraph()
         req_para.add_run("Requirement: ").bold = True
         req_para.add_run(resp_data.get('requirement_text', ''))
         
-        # Response
         resp_heading = doc.add_heading("Response", 3)
         resp_para = doc.add_paragraph(resp_data.get('response', ''))
         
-        # Quality indicator if available
         if resp_data.get('quality'):
             quality = resp_data['quality']
             quality_para = doc.add_paragraph()
@@ -121,7 +99,6 @@ def generate_rfp_docx(
         logger.info("DOCX saved to: %s", output_path.absolute())
         return output_path.read_bytes()
     else:
-        # Save to temporary file and return bytes
         import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmp:
             doc.save(tmp.name)

@@ -1,6 +1,8 @@
 services:
   backend:
-    build: .
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
     container_name: rfp-backend
     ports:
       - "8001:8001"
@@ -19,5 +21,17 @@ services:
     volumes:
       - ./output:/app/output
       - ./docs:/app/docs
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+    container_name: rfp-frontend
+    depends_on:
+      - backend
+    ports:
+      - "4173:80"
+    environment:
+      - VITE_API_URL=http://backend:8001
 
 

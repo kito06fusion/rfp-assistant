@@ -40,7 +40,6 @@ class RAGSystem:
         )
 
     def _get_embedding_client(self):
-        """Get Azure OpenAI client specifically for embeddings (may have different config)."""
         if self.client is None:
             embedding_api_key = os.environ.get("AZURE_OPENAI_EMBEDDING_API_KEY")
             embedding_endpoint = os.environ.get("AZURE_OPENAI_EMBEDDING_ENDPOINT")
@@ -61,7 +60,6 @@ class RAGSystem:
         return self.client
 
     def _generate_embeddings(self, texts: List[str]) -> np.ndarray:
-        """Generate embeddings for texts with detailed logging."""
         client = self._get_embedding_client()
         embedding_deployment = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME", EMBEDDING_MODEL)
         
@@ -117,7 +115,6 @@ class RAGSystem:
         return embeddings_array
 
     def _chunk_text(self, text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
-        """Split text into overlapping chunks with detailed logging."""
         text_length = len(text)
         logger.info("Chunking text: length=%d chars, chunk_size=%d, overlap=%d", text_length, chunk_size, overlap)
         
@@ -160,7 +157,6 @@ class RAGSystem:
         return chunks
 
     def _load_document(self, file_path: Path) -> str:
-        """Load text from a document file with detailed logging."""
         suffix = file_path.suffix.lower()
         file_size = file_path.stat().st_size if file_path.exists() else 0
         logger.info(
@@ -321,7 +317,6 @@ class RAGSystem:
         )
 
     def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """Search for similar documents with detailed logging."""
         if self.index is None:
             raise ValueError("Index not built. Call build_index() or load_index() first.")
 

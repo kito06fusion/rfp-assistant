@@ -90,7 +90,6 @@ class BuildQuery(BaseModel):
 
 
 class ResponseResult(BaseModel):
-    """Result from the response generation agent."""
     response_text: str = Field(description="The generated RFP response text")
     build_query_used: str = Field(description="The build query that was used")
     num_retrieved_chunks: int = Field(description="Number of RAG chunks used")
@@ -98,7 +97,6 @@ class ResponseResult(BaseModel):
 
 
 class Question(BaseModel):
-    """A question generated for unknown information."""
     question_id: str = Field(description="Unique identifier for the question")
     requirement_id: Optional[str] = Field(default=None, description="ID of the requirement this question relates to (None for build query questions)")
     question_text: str = Field(description="The actual question")
@@ -110,14 +108,12 @@ class Question(BaseModel):
 
 
 class Answer(BaseModel):
-    """An answer provided by the user."""
     question_id: str = Field(description="ID of the question being answered")
     answer_text: str = Field(description="The answer provided by the user")
     answered_at: Optional[str] = Field(default=None, description="Timestamp when answer was provided")
 
 
 class ConversationContext(BaseModel):
-    """Context for a conversation session."""
     session_id: str = Field(description="Unique session identifier")
     requirement_id: Optional[str] = Field(default=None, description="Current requirement being processed")
     questions: List[Question] = Field(default_factory=list, description="List of questions")
@@ -125,14 +121,12 @@ class ConversationContext(BaseModel):
     created_at: Optional[str] = Field(default=None, description="Session creation timestamp")
     
     def get_answer_for_question(self, question_id: str) -> Optional[str]:
-        """Get answer text for a question ID."""
         for answer in self.answers:
             if answer.question_id == question_id:
                 return answer.answer_text
         return None
     
     def get_qa_context(self) -> str:
-        """Format Q&A pairs for inclusion in prompts."""
         if not self.answers:
             return ""
         
@@ -140,7 +134,6 @@ class ConversationContext(BaseModel):
         parts.append("=" * 80)
         
         for answer in self.answers:
-            # Find corresponding question
             question = next((q for q in self.questions if q.question_id == answer.question_id), None)
             if question:
                 parts.append(f"Q: {question.question_text}")
