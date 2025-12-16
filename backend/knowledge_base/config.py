@@ -1,10 +1,3 @@
-"""
-Configuration file for fusionAIx Knowledge Base.
-
-This file allows easy updates to fusionAIx information without modifying code.
-You can add new capabilities, case studies, and accelerators here.
-"""
-
 from typing import List, Dict, Any
 
 COMPANY_NAME = "fusionAIx"

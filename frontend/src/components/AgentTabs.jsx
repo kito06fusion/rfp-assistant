@@ -14,16 +14,6 @@ const TABS = [
 
 export default function AgentTabs() {
   const { activeTab, setActiveTab, pipelineData } = usePipeline()
-  const [hasUnansweredQuestions, setHasUnansweredQuestions] = useState(false)
-  
-  // Check for unanswered questions
-  useEffect(() => {
-    const checkQuestions = async () => {
-      // This will be set by AgentPanel when questions are available
-      // For now, we'll rely on AgentPanel to show the notification
-    }
-    checkQuestions()
-  }, [pipelineData.requirements])
 
   const hasData = pipelineData.extraction !== null
 

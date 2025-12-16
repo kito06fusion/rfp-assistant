@@ -1,9 +1,3 @@
-"""
-Quality Assessment Agent
-
-Validates and scores response quality against requirements.
-"""
-
 from __future__ import annotations
 
 import logging

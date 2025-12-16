@@ -113,7 +113,6 @@ def chat_completion(
     max_tokens: Optional[int] = None,
     max_retries: int = 2,
 ) -> str:
-    """Synchronous chat completion function."""
     logger.info("Calling LLM model=%s temperature=%s max_tokens=%s", model, temperature, max_tokens)
     use_azure = model.startswith("gpt-5") or "azure" in model.lower()
     if use_azure:

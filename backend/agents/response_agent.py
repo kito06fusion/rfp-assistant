@@ -19,11 +19,6 @@ def format_retrieved_chunks(
     max_chunks: int = 4,
     max_total_chars: int = 3000,
 ) -> str:
-    """
-    Format RAG chunks for inclusion in the prompt while:
-    - de‑duplicating highly similar chunks
-    - limiting the total amount of evidence text
-    """
     if not chunks:
         return ""
 
@@ -62,9 +57,6 @@ def format_retrieved_chunks(
 def run_response_agent(
     build_query: BuildQuery,
     # NOTE: rag_system is kept for backwards‑compatibility with existing callers,
-    # but this agent no longer performs its own RAG lookup. RAG is expected to
-    # run earlier in the pipeline (e.g. during question generation / build‑query
-    # enrichment) so we don't pay the embedding + FAISS search cost twice.
     rag_system: Optional[RAGSystem] = None,
     num_retrieval_chunks: int = 5,
     temperature: float = 0.0,

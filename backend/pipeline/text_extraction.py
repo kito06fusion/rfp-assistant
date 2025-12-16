@@ -189,7 +189,6 @@ def _extract_text_from_docx_direct(docx_path: Path) -> str:
 
 
 def _extract_text_from_excel_direct(excel_path: Path) -> str:
-    """Extract text from Excel files (.xlsx, .xls) by converting sheets to plain text."""
     try:
         import pandas as pd  # type: ignore
     except ImportError:

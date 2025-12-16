@@ -1,11 +1,3 @@
-"""
-Question Generation Agent
-
-Analyzes build queries and identifies information gaps. Generates questions for unknown information
-that is not available in the company knowledge base. The LLM analyzes the build query to determine
-what information is needed to generate a proper response.
-"""
-
 from __future__ import annotations
 
 import json

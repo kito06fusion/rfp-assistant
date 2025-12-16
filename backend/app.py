@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response, FileResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -36,17 +36,16 @@ from backend.models import (
     Question,
     Answer,
     ConversationContext,
+    BuildQuery,
 )
 from backend.knowledge_base import FusionAIxKnowledgeBase
 from backend.knowledge_base.company_kb import CompanyKnowledgeBase
 
 
 def _setup_rag_and_kb(use_rag: bool) -> tuple[Optional[RAGSystem], FusionAIxKnowledgeBase]:
-    """Setup RAG system and knowledge base."""
     rag_system = None
     if use_rag:
         try:
-            # Use project-root absolute paths so RAG always points to the correct docs folder
             project_root = Path(__file__).parent.parent
             docs_folder = project_root / "docs"
             index_path = project_root / "rag_index"
@@ -104,20 +103,14 @@ def _enrich_build_query_with_rag(
     requirements_result: RequirementsResult,
     rag_contexts_by_req: Dict[str, str],
 ) -> BuildQuery:
-    """
-    Enrich build query text with RAG-supported information per requirement.
-    This runs after question generation so the build query reflects what is already
-    known from prior RFPs.
-    """
     if not rag_contexts_by_req:
         return build_query
 
     logger.info(
-        "Enriching build query with RAG for %d requirement(s)",
+        "Enriching build query with compact RAG index for %d requirement(s)",
         len(rag_contexts_by_req),
     )
 
-    # Build a mapping from requirement_id to normalized_text for display
     req_text_by_id: Dict[str, str] = {
         req.id: req.normalized_text for req in requirements_result.solution_requirements
     }
@@ -127,19 +120,22 @@ def _enrich_build_query_with_rag(
     rag_section_lines: List[str] = []
     rag_section_lines.append("")
     rag_section_lines.append("=" * 80)
-    rag_section_lines.append("RAG-SUPPORTED REQUIREMENTS (information already known from prior RFPs)")
+    rag_section_lines.append("RAG-SUPPORTED REQUIREMENTS (compact index only – full evidence kept outside build_query)")
     rag_section_lines.append("=" * 80)
     rag_section_lines.append("")
 
     for req_id, rag_ctx in rag_contexts_by_req.items():
-        full_text = rag_ctx.strip()
         req_text = req_text_by_id.get(req_id, "")
         rag_section_lines.append(f"Requirement ID: {req_id}")
         if req_text:
             rag_section_lines.append(f"Requirement: {req_text}")
-        rag_section_lines.append("RAG Evidence:")
-        rag_section_lines.append(full_text if full_text else "[No RAG evidence text available]")
-        rag_section_lines.append("--- END RAG EVIDENCE ---")
+        first_line = rag_ctx.strip().splitlines()[0] if rag_ctx.strip() else ""
+        preview = (first_line[:140] + "...") if len(first_line) > 140 else first_line
+        rag_section_lines.append(
+            f"RAG: evidence available in RAG system "
+            f"(preview: {preview or 'no preview available'})"
+        )
+        rag_section_lines.append("--- END RAG INDEX ITEM ---")
         rag_section_lines.append("")
 
     enriched_text = base_text.rstrip() + "\n" + "\n".join(rag_section_lines)
@@ -151,10 +147,6 @@ def validate_before_generation(
     extraction_result: ExtractionResult,
     requirements_result: RequirementsResult,
 ) -> List[str]:
-    """
-    Quick validation before expensive LLM calls.
-    Returns list of error messages (empty if all checks pass).
-    """
     errors = []
     
     if not extraction_result.language:
@@ -234,19 +226,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static files from frontend
 project_root = Path(__file__).parent.parent
 frontend_dist = project_root / "frontend" / "dist"
 frontend_src = project_root / "frontend" / "src"
 
-# Mount static assets
 if frontend_dist.exists() and (frontend_dist / "index.html").exists():
-    # Production: serve from dist
     if (frontend_dist / "assets").exists():
         app.mount("/assets", StaticFiles(directory=str(frontend_dist / "assets")), name="assets")
     logger.info("Serving frontend from dist directory (production build)")
 elif frontend_src.exists():
-    # Development: serve source files directly
     app.mount("/src", StaticFiles(directory=str(frontend_src)), name="src")
     if (frontend_src.parent / "public").exists():
         app.mount("/public", StaticFiles(directory=str(frontend_src.parent / "public")), name="public")
@@ -255,7 +243,6 @@ elif frontend_src.exists():
 _fusionaix_kb: FusionAIxKnowledgeBase | None = None
 
 def get_fusionaix_kb() -> FusionAIxKnowledgeBase:
-    """Get or create fusionAIx knowledge base instance."""
     global _fusionaix_kb
     if _fusionaix_kb is None:
         logger.info("Initializing fusionAIx knowledge base")
@@ -271,9 +258,7 @@ def get_fusionaix_kb() -> FusionAIxKnowledgeBase:
 
 @app.get("/", response_class=HTMLResponse)
 async def index() -> HTMLResponse:
-    """Serve the frontend index.html file."""
     project_root = Path(__file__).resolve().parent.parent
-    # Try dist first (production), then regular frontend folder
     index_path = project_root / "frontend" / "dist" / "index.html"
     if not index_path.exists():
         index_path = project_root / "frontend" / "index.html"
@@ -288,7 +273,6 @@ async def process_rfp(file: UploadFile = File(...)) -> Dict[str, Any]:
     logger.info("REQUEST %s: /process-rfp file=%s", request_id, file.filename)
 
     suffix = Path(file.filename).suffix.lower()
-    # Supported input types: PDF, Word (DOCX/DOC), Excel (XLS/XLSX), and plain text
     if suffix not in {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".txt"}:
         logger.warning("REQUEST %s: unsupported file type %s", request_id, suffix)
         raise HTTPException(
@@ -304,7 +288,7 @@ async def process_rfp(file: UploadFile = File(...)) -> Dict[str, Any]:
     try:
         with open(temp_path, "wb") as f:
             while True:
-                chunk = await file.read(2 * 1024 * 1024)  # 2 MB chunks for better performance
+                chunk = await file.read(2 * 1024 * 1024)
                 if not chunk:
                     break
                 f.write(chunk)
@@ -419,7 +403,6 @@ async def run_requirements(req: RequirementsRequest) -> Dict[str, Any]:
     try:
         result = run_requirements_agent(essential_text=req.essential_text, structured_info={})
         
-        # Run structure detection after requirements are extracted
         logger.info("Running structure detection on %d response structure requirements", 
                    len(result.response_structure_requirements))
         structure_detection_dict = detect_structure(result.response_structure_requirements)
@@ -449,11 +432,6 @@ async def run_requirements(req: RequirementsRequest) -> Dict[str, Any]:
 
 @app.post("/update-scope")
 async def update_scope(req: UpdateScopeRequest) -> Dict[str, Any]:
-    """
-    Accept manually edited scope text before confirmation.
-    This does not re-run the scope agent; it simply persists the edited fields
-    in the same shape as ScopeResult for downstream steps.
-    """
     logger.info(
         "Update scope endpoint called (necessary_chars=%d)",
         len(req.necessary_text),
@@ -471,12 +449,8 @@ async def update_scope(req: UpdateScopeRequest) -> Dict[str, Any]:
 
 @app.post("/update-requirements")
 async def update_requirements(req: UpdateRequirementsRequest) -> Dict[str, Any]:
-    """
-    Accept manually edited requirements JSON before build-query.
-    """
     logger.info("Update requirements endpoint called")
     try:
-        # Validate structure using RequirementsResult
         result = RequirementsResult(**req.requirements)
         return result.to_dict()
     except Exception as exc:
@@ -493,7 +467,6 @@ class BuildQueryRequest(BaseModel):
 
 @app.post("/build-query")
 async def build_query_endpoint(req: BuildQueryRequest) -> Dict[str, Any]:
-    """Build consolidated query from extraction and requirements."""
     logger.info("Build query endpoint called")
     try:
         extraction_result = ExtractionResult(**req.extraction)
@@ -518,7 +491,6 @@ class GenerateResponseRequest(BaseModel):
 
 @app.post("/generate-response")
 async def generate_response_endpoint(req: GenerateResponseRequest) -> Dict[str, Any]:
-    """Generate RFP response - uses structured response if explicit structure detected, otherwise per-requirement."""
     logger.info("Generate response endpoint called (use_rag=%s)", req.use_rag)
     try:
         from backend.models import BuildQuery, ExtractionResult, RequirementsResult
@@ -532,7 +504,6 @@ async def generate_response_endpoint(req: GenerateResponseRequest) -> Dict[str, 
                 detail="No solution requirements found. Cannot generate response.",
             )
         
-        # Check if structure detection was done, if not, run it now
         if requirements_result.structure_detection is None:
             logger.info("Structure detection not found in requirements, running now...")
             structure_detection_dict = detect_structure(requirements_result.response_structure_requirements)
@@ -540,7 +511,6 @@ async def generate_response_endpoint(req: GenerateResponseRequest) -> Dict[str, 
         
         structure_detection = requirements_result.structure_detection
         
-        # Conditional routing: structured response vs per-requirement response
         if structure_detection.has_explicit_structure and structure_detection.confidence >= 0.6:
             logger.info(
                 "=" * 80
@@ -607,7 +577,6 @@ async def _generate_structured_response(
     num_retrieval_chunks: int,
     session_id: Optional[str] = None,
 ) -> Response:
-    """Generate structured response following RFP-specified structure."""
     rag_system, knowledge_base = _setup_rag_and_kb(use_rag)
     
     logger.info("=" * 80)
@@ -630,7 +599,6 @@ async def _generate_structured_response(
     start_time = time.time()
     
     try:
-        # Get Q&A context if session_id provided
         qa_context = ""
         if session_id and session_id in _conversation_sessions:
             context = _conversation_sessions[session_id]
@@ -647,8 +615,6 @@ async def _generate_structured_response(
             qa_context=qa_context,
         )
         
-        # Convert structured response to individual_responses format for document generation
-        # Split by sections if possible, or create single response
         individual_responses = [{
             "requirement_id": "STRUCTURED",
             "requirement_text": f"Complete structured response following: {', '.join(structure_detection.detected_sections)}",
@@ -660,7 +626,6 @@ async def _generate_structured_response(
         total_elapsed = time.time() - start_time
         logger.info("Structured response generated in %.2f seconds (length=%d chars)", total_elapsed, len(result.response_text))
         
-        # Generate Word (DOCX) document instead of PDF for editable output
         from backend.document_formatter import generate_rfp_docx
         if not generate_rfp_docx:
             logger.error("DOCX generation not available. Install python-docx to enable Word export.")
@@ -708,6 +673,65 @@ async def _generate_structured_response(
         ) from exc
 
 
+def _generate_docx_response(
+    individual_responses: List[Dict[str, Any]],
+    extraction_result: ExtractionResult,
+    requirements_result: RequirementsResult,
+) -> Response:
+    from backend.document_formatter import generate_rfp_docx
+    if not generate_rfp_docx:
+        raise ImportError("DOCX generation not available. Install python-docx.")
+    
+    rfp_title = f"RFP Response"
+    if extraction_result.key_requirements_summary:
+        rfp_title = f"RFP Response - {extraction_result.key_requirements_summary[:50]}..."
+    
+    logger.info("Generating DOCX with %d individual responses", len(individual_responses))
+    docx_start_time = time.time()
+    
+    project_root = Path(__file__).parent.parent
+    output_dir = project_root / "output" / "docx"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("DOCX output directory: %s (absolute: %s)", output_dir, output_dir.absolute())
+    
+    timestamp = int(time.time())
+    docx_filename = f"rfp_response_{extraction_result.language}_{timestamp}.docx"
+    docx_path = output_dir / docx_filename
+    logger.info("DOCX will be saved to: %s", docx_path.absolute())
+    
+    generate_rfp_docx(
+        individual_responses=individual_responses,
+        requirements_result=requirements_result,
+        extraction_result=extraction_result,
+        rfp_title=rfp_title,
+        output_path=docx_path,
+    )
+    
+    docx_bytes = docx_path.read_bytes()
+    
+    docx_elapsed = time.time() - docx_start_time
+    docx_absolute_path = docx_path.absolute()
+    logger.info(
+        "DOCX generation completed successfully: %d bytes in %.2f seconds, saved to %s",
+        len(docx_bytes),
+        docx_elapsed,
+        docx_absolute_path,
+    )
+    
+    if not docx_path.exists():
+        logger.error("DOCX file was not found after generation at: %s", docx_absolute_path)
+        raise FileNotFoundError(f"DOCX was not saved to {docx_absolute_path}")
+    
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Content-Disposition": f'attachment; filename="{docx_filename}"',
+            "Content-Length": str(len(docx_bytes)),
+        }
+    )
+
+
 async def _generate_per_requirement_response(
     extraction_result: ExtractionResult,
     requirements_result: RequirementsResult,
@@ -715,10 +739,8 @@ async def _generate_per_requirement_response(
     num_retrieval_chunks: int,
     session_id: Optional[str] = None,
 ) -> Response:
-    """Generate per-requirement response (original flow)."""
     rag_system, knowledge_base = _setup_rag_and_kb(use_rag)
     
-    # Get Q&A context if session_id provided
     qa_context = ""
     if session_id and session_id in _conversation_sessions:
         context = _conversation_sessions[session_id]
@@ -773,7 +795,7 @@ async def _generate_per_requirement_response(
                 single_requirement=solution_req,
                 all_response_structure_requirements=requirements_result.response_structure_requirements,
             )
-            build_query_obj.confirmed = True  # Auto-confirm for individual requirements
+            build_query_obj.confirmed = True
             
             try:
                 result = run_response_agent(
@@ -786,7 +808,6 @@ async def _generate_per_requirement_response(
                 words = solution_req.normalized_text.split()
                 key_phrase = " ".join(words[:10]) + ("..." if len(words) > 10 else "")
                 
-                # Assess response quality
                 quality_assessment = assess_response_quality(solution_req, result.response_text)
                 
                 individual_responses.append({
@@ -1039,11 +1060,10 @@ async def _generate_per_requirement_response(
             ) from catastrophic_error
     
     if not individual_responses:
-        if partial_completion:
-            raise HTTPException(
-                status_code=500,
-                detail="Response generation failed before any responses could be generated. Check server logs.",
-            )
+        raise HTTPException(
+            status_code=500,
+            detail="Response generation failed before any responses could be generated. Check server logs.",
+        )
     
     if partial_completion:
         logger.warning(
@@ -1096,61 +1116,9 @@ async def _generate_per_requirement_response(
     logger.info("  Combined response length: %d characters", len(combined_response))
     logger.info("=" * 80)
     
-    # Generate Word (DOCX) document for editable output
     logger.info("Generating DOCX document...")
     try:
-        from backend.document_formatter import generate_rfp_docx
-        if not generate_rfp_docx:
-            raise ImportError("DOCX generation not available. Install python-docx.")
-
-        rfp_title = f"RFP Response"
-        if extraction_result.key_requirements_summary:
-            rfp_title = f"RFP Response - {extraction_result.key_requirements_summary[:50]}..."
-        
-        logger.info("Generating DOCX with %d individual responses", len(individual_responses))
-        docx_start_time = time.time()
-        
-        project_root = Path(__file__).parent.parent
-        output_dir = project_root / "output" / "docx"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("DOCX output directory: %s (absolute: %s)", output_dir, output_dir.absolute())
-        
-        timestamp = int(time.time())
-        docx_filename = f"rfp_response_{extraction_result.language}_{timestamp}.docx"
-        docx_path = output_dir / docx_filename
-        logger.info("DOCX will be saved to: %s", docx_path.absolute())
-        
-        docx_bytes = generate_rfp_docx(
-            individual_responses=individual_responses,
-            requirements_result=requirements_result,
-            extraction_result=extraction_result,
-            rfp_title=rfp_title,
-            output_path=docx_path,
-        )
-        
-        docx_bytes = docx_path.read_bytes()
-        
-        docx_elapsed = time.time() - docx_start_time
-        docx_absolute_path = docx_path.absolute()
-        logger.info(
-            "DOCX generation completed successfully: %d bytes in %.2f seconds, saved to %s",
-            len(docx_bytes),
-            docx_elapsed,
-            docx_absolute_path,
-        )
-        
-        if not docx_path.exists():
-            logger.error("DOCX file was not found after generation at: %s", docx_absolute_path)
-            raise FileNotFoundError(f"DOCX was not saved to {docx_absolute_path}")
-        
-        return Response(
-            content=docx_bytes,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={
-                "Content-Disposition": f'attachment; filename="{docx_filename}"',
-                "Content-Length": str(len(docx_bytes)),
-            }
-        )
+        return _generate_docx_response(individual_responses, extraction_result, requirements_result)
     except ImportError as import_exc:
         logger.error("DOCX generation not available: %s", import_exc)
         raise HTTPException(
@@ -1163,18 +1131,12 @@ async def _generate_per_requirement_response(
             status_code=500,
             detail=f"DOCX generation failed: {str(docx_exc)}",
         ) from docx_exc
-        raise HTTPException(
-            status_code=500,
-            detail=f"Response generation failed. Check server logs. Error: {str(exc)}",
-        ) from exc
 
 
-# Chat/Question endpoints
 _conversation_sessions: Dict[str, ConversationContext] = {}
 _company_kb_instance: Optional[CompanyKnowledgeBase] = None
 
 def get_company_kb() -> CompanyKnowledgeBase:
-    """Get or create company knowledge base instance."""
     global _company_kb_instance
     if _company_kb_instance is None:
         logger.info("Initializing company knowledge base")
@@ -1194,7 +1156,6 @@ class EnrichBuildQueryRequest(BaseModel):
 
 @app.post("/generate-questions")
 async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str, Any]:
-    """Generate questions for unknown information in build query or requirements."""
     logger.info("Generate questions endpoint called")
     try:
         from backend.models import RequirementsResult, BuildQuery
@@ -1205,16 +1166,12 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
         )
         
         company_kb = get_company_kb()
-        # Use RAG to avoid asking questions for information already present in prior RFPs
         rag_system, _ = _setup_rag_and_kb(use_rag=True)
         
-        # Priority: analyze build query if provided, otherwise fall back to requirements
         if req.build_query:
             logger.info("Analyzing build query for questions")
             build_query_obj = BuildQuery(**req.build_query)
             
-            # We need the requirements to analyze them individually
-            # Get requirements from the request if available
             if req.requirements:
                 requirements_result = RequirementsResult(**req.requirements)
                 questions_list, rag_contexts_by_req = analyze_build_query_for_questions(
@@ -1224,14 +1181,12 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
                     max_questions_per_requirement=3,
                     rag_system=rag_system,
                 )
-                # Enrich build query with RAG-supported information
                 enriched_build_query = _enrich_build_query_with_rag(
                     build_query_obj,
                     requirements_result,
                     rag_contexts_by_req,
                 )
             else:
-                # Fallback: analyze build query as a whole (less ideal)
                 logger.warning("Requirements not provided with build query, analyzing build query as whole")
                 questions_list = analyze_build_query_for_questions_legacy(
                     build_query_obj,
@@ -1239,7 +1194,6 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
                     max_questions=20,
                 )
             
-            # Convert to Question objects
             all_questions = []
             questions_by_req = {}
             for idx, q in enumerate(questions_list):
@@ -1254,7 +1208,6 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
                 )
                 all_questions.append(question.model_dump())
                 
-                # Group by requirement
                 if req_id:
                     if req_id not in questions_by_req:
                         questions_by_req[req_id] = []
@@ -1266,7 +1219,6 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
                 "questions": all_questions,
                 "questions_by_requirement": questions_by_req,
             }
-            # Include enriched build query if we had requirements (and thus RAG contexts)
             if req.requirements:
                 response_payload["enriched_build_query"] = enriched_build_query.model_dump()
             return response_payload
@@ -1274,7 +1226,6 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
             logger.info("Analyzing requirements for questions (legacy mode)")
             requirements_result = RequirementsResult(**req.requirements)
             
-            # Generate questions for all solution requirements, using RAG to treat known info as answered
             questions_dict = analyze_requirements_for_questions(
                 requirements_result.solution_requirements,
                 company_kb,
@@ -1282,11 +1233,9 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
                 rag_system=rag_system,
             )
             
-            # Convert to list format for response
             all_questions = []
             for req_id, questions in questions_dict.items():
                 for q in questions:
-                    # q is already a dict from question_agent
                     question = Question(
                         question_id=f"{req_id}-q-{len(all_questions)}",
                         requirement_id=req_id,
@@ -1325,7 +1274,6 @@ class CreateSessionRequest(BaseModel):
 
 @app.post("/chat/session")
 async def create_chat_session(req: CreateSessionRequest) -> Dict[str, Any]:
-    """Create a new chat session."""
     session_id = str(uuid.uuid4())
     context = ConversationContext(
         session_id=session_id,
@@ -1344,7 +1292,6 @@ class AddQuestionsRequest(BaseModel):
 
 @app.post("/chat/questions")
 async def add_questions(req: AddQuestionsRequest) -> Dict[str, Any]:
-    """Add questions to a chat session."""
     if req.session_id not in _conversation_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     
@@ -1367,18 +1314,15 @@ class SubmitAnswerRequest(BaseModel):
 
 @app.post("/chat/answer")
 async def submit_answer(req: SubmitAnswerRequest) -> Dict[str, Any]:
-    """Submit an answer to a question."""
     if req.session_id not in _conversation_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     
     context = _conversation_sessions[req.session_id]
     
-    # Find question
     question = next((q for q in context.questions if q.question_id == req.question_id), None)
     if not question:
         raise HTTPException(status_code=404, detail="Question not found")
     
-    # Create answer for the explicitly answered question
     answer = Answer(
         question_id=req.question_id,
         answer_text=req.answer_text,
@@ -1387,7 +1331,6 @@ async def submit_answer(req: SubmitAnswerRequest) -> Dict[str, Any]:
     context.answers.append(answer)
     question.answered = True
     
-    # Live-updating pipeline: infer which other open questions are now fully answered
     remaining_questions = [q for q in context.questions if not q.answered]
     auto_resolved_ids: list[str] = []
     if remaining_questions:
@@ -1405,7 +1348,6 @@ async def submit_answer(req: SubmitAnswerRequest) -> Dict[str, Any]:
             )
             auto_resolved_ids = []
     
-    # Mark inferred questions as answered using the same answer text
     for qid in auto_resolved_ids:
         extra_q = next((q for q in context.questions if q.question_id == qid), None)
         if extra_q and not extra_q.answered:
@@ -1441,7 +1383,6 @@ async def submit_answer(req: SubmitAnswerRequest) -> Dict[str, Any]:
 
 @app.get("/chat/session/{session_id}")
 async def get_session(session_id: str) -> Dict[str, Any]:
-    """Get conversation session details."""
     if session_id not in _conversation_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     
@@ -1458,10 +1399,6 @@ async def get_session(session_id: str) -> Dict[str, Any]:
 
 @app.post("/enrich-build-query")
 async def enrich_build_query_endpoint(req: EnrichBuildQueryRequest) -> Dict[str, Any]:
-    """
-    Enrich build query text with the latest Q&A context for a chat session.
-    This keeps build_query.query_text as the single, fully populated source of truth.
-    """
     from backend.models import BuildQuery
 
     try:
@@ -1472,34 +1409,19 @@ async def enrich_build_query_endpoint(req: EnrichBuildQueryRequest) -> Dict[str,
             detail=f"Invalid build_query payload: {str(exc)}",
         ) from exc
 
-    qa_context = ""
     if req.session_id and req.session_id in _conversation_sessions:
         context = _conversation_sessions[req.session_id]
-        qa_context = context.get_qa_context()
         logger.info(
-            "Enriching build query from session %s (answers=%d)",
+            "Enrich build query called for session %s (answers=%d) – build_query text left unchanged",
             req.session_id,
             len(context.answers),
         )
     else:
-        logger.info("Enrich build query called without valid session_id; using original build query text only")
+        logger.info("Enrich build query called without valid session_id; returning original build query text")
 
-    base_text = build_query.query_text or ""
-    marker = "USER-PROVIDED INFORMATION (from Q&A):"
-    idx = base_text.find(marker)
-    if idx != -1:
-        base_text = base_text[:idx].rstrip()
-
-    if qa_context:
-        enriched_text = f"{base_text.rstrip()}\n\n{qa_context}"
-    else:
-        enriched_text = base_text
-
-    build_query.query_text = enriched_text
     return build_query.model_dump()
 
 
-# Response preview and editing endpoints
 _response_cache: Dict[str, List[Dict[str, Any]]] = {}
 
 
@@ -1513,7 +1435,6 @@ class PreviewResponseRequest(BaseModel):
 
 @app.post("/preview-responses")
 async def preview_responses_endpoint(req: PreviewResponseRequest) -> Dict[str, Any]:
-    """Generate responses and return for preview (without PDF generation)."""
     logger.info("Preview responses endpoint called")
     try:
         from backend.models import ExtractionResult, RequirementsResult
@@ -1527,14 +1448,12 @@ async def preview_responses_endpoint(req: PreviewResponseRequest) -> Dict[str, A
                 detail="No solution requirements found. Cannot generate responses.",
             )
         
-        # Check structure detection
         if requirements_result.structure_detection is None:
             structure_detection_dict = detect_structure(requirements_result.response_structure_requirements)
             requirements_result.structure_detection = StructureDetectionResult(**structure_detection_dict)
         
         structure_detection = requirements_result.structure_detection
         
-        # For preview, we'll generate per-requirement responses (easier to edit)
         rag_system, knowledge_base = _setup_rag_and_kb(req.use_rag)
         
         # Get Q&A context
@@ -1543,7 +1462,6 @@ async def preview_responses_endpoint(req: PreviewResponseRequest) -> Dict[str, A
             context = _conversation_sessions[req.session_id]
             qa_context = context.get_qa_context()
         
-        # Validate
         validation_errors = validate_before_generation(extraction_result, requirements_result)
         if validation_errors:
             raise HTTPException(status_code=400, detail="Validation failed: " + "; ".join(validation_errors))
@@ -1571,7 +1489,6 @@ async def preview_responses_endpoint(req: PreviewResponseRequest) -> Dict[str, A
                 words = solution_req.normalized_text.split()
                 key_phrase = " ".join(words[:10]) + ("..." if len(words) > 10 else "")
                 
-                # Assess response quality
                 quality_assessment = assess_response_quality(solution_req, result.response_text)
                 
                 individual_responses.append({
@@ -1601,7 +1518,6 @@ async def preview_responses_endpoint(req: PreviewResponseRequest) -> Dict[str, A
                     },
                 })
         
-        # Cache responses for editing
         preview_id = str(uuid.uuid4())
         _response_cache[preview_id] = individual_responses
         
@@ -1628,7 +1544,6 @@ class UpdateResponseRequest(BaseModel):
 
 @app.post("/update-response")
 async def update_response_endpoint(req: UpdateResponseRequest) -> Dict[str, Any]:
-    """Update a response in the preview cache."""
     if req.preview_id not in _response_cache:
         raise HTTPException(status_code=404, detail="Preview not found")
     
@@ -1648,12 +1563,11 @@ class GeneratePDFFromPreviewRequest(BaseModel):
     preview_id: str
     extraction: Dict[str, Any]
     requirements: Dict[str, Any]
-    format: str = "pdf"  # pdf, docx, markdown
+    format: str = "pdf" 
 
 
 @app.post("/generate-pdf-from-preview")
 async def generate_pdf_from_preview_endpoint(req: GeneratePDFFromPreviewRequest) -> Response:
-    """Generate document from previewed (and possibly edited) responses. Supports PDF, DOCX, Markdown."""
     if req.preview_id not in _response_cache:
         raise HTTPException(status_code=404, detail="Preview not found")
     
@@ -1721,7 +1635,7 @@ async def generate_pdf_from_preview_endpoint(req: GeneratePDFFromPreviewRequest)
             }
         )
     
-    else:  # Default to PDF
+    else:
         from backend.document_formatter import generate_rfp_pdf
         
         output_dir = project_root / "output" / "pdfs"
@@ -1757,22 +1671,9 @@ async def health() -> Dict[str, Any]:
 
 @app.get("/{path:path}")
 async def serve_frontend(path: str):
-    """
-    Serve frontend routes (for SPA routing).
-    This catches all non-API routes and serves the index.html.
-    MUST be defined LAST so it doesn't interfere with API routes.
-    
-    Note: FastAPI matches more specific routes first, so API routes defined above
-    will be matched before this catch-all. This route only serves the frontend
-    for routes that don't match any API endpoint.
-    """
-    # Don't interfere with static assets - these are handled by StaticFiles mounts
-    # If it's a static asset request, let it fall through to 404 (StaticFiles will handle it)
     if path.startswith(("assets/", "src/", "public/")):
         raise HTTPException(status_code=404, detail="Static file not found")
     
-    # For all other routes, serve index.html (SPA routing)
-    # FastAPI will have already matched API routes above, so this only catches frontend routes
     project_root = Path(__file__).resolve().parent.parent
     index_path = project_root / "frontend" / "dist" / "index.html"
     if not index_path.exists():
