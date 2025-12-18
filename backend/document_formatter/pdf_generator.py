@@ -15,17 +15,21 @@ logger = logging.getLogger(__name__)
 
 COMPANY_INFO = {
     "name": "fusionAIx",
-    "website": "fusionaix.com",
+    "website": "www.fusionaix.com",
     "logo_path": "image.png",
-    "overview": """fusionAIx is a specialized low-code and AI-driven digital transformation partner focused on modernizing enterprise workflows, improving customer/employee experiences, and accelerating delivery through platform-led automation. The company was established in 2023, with active entities including a UK-based consultancy (incorporated 3 August 2023) and an India-based technology arm (incorporated 20 July 2023).
+    "overview": """At fusionAIx, we believe that the future of digital transformation lies in the seamless blend of low-code platforms and artificial intelligence. Our core team brings together decades of implementation experience, domain expertise, and a passion for innovation. We partner with enterprises to reimagine processes, accelerate application delivery, and unlock new levels of efficiency. We help businesses scale smarter, faster, and with greater impact.
 
-With proven capabilities across Pega Constellation, Microsoft Power Platform, and ServiceNow, fusionAIx provides advisory, modernization, implementation, and managed delivery services designed to meet enterprise requirements for scalability, security, and governance.
+With a collaborative spirit and a commitment to excellence, our team transforms complex challenges into intelligent, practical solutions. fusionAIx is not just about technology—it's about empowering people, industries, and enterprises to thrive in a digital-first world.
 
-In the Pega ecosystem, fusionAIx positions itself as a niche Constellation specialist and states it has delivered 20+ Pega Constellation implementations globally. The company also highlights an AI-powered Constellation Center of Excellence aimed at accelerating DX component creation and modernization outcomes.
+We are proud to be officially recognized as a Great Place To Work® Certified Company for 2025–26, reflecting our commitment to a culture built on trust, innovation, and people-first values.
 
-To speed time-to-value, fusionAIx offers proprietary accelerators and solution components such as fxAgentSDK, fxAIStudio, fxMockUpToView, and fxSmartDCO, alongside Pega Marketplace offerings like fxTranslate for Constellation localization support.
+fusionAIx delivers tailored solutions that blend AI and automation to drive measurable results across industries. We are a niche Pega partner with 20+ successful Pega Constellation implementations across the globe. As Constellation migration experts, we focus on pattern-based development with Constellation, enabling faster project go-lives than traditional implementation approaches.
 
-The firm supports clients across industries including insurance, banking/financial services, government, and healthcare, combining platform expertise with structured knowledge transfer to help customers build sustainable, future-ready capabilities."""
+Our proven capabilities span three core technology platforms: Pega Constellation, Microsoft Power Platform, and ServiceNow. Through these platforms, we provide comprehensive services including Low Code/No Code development, Digital Process Transformation, and AI & Data solutions.
+
+To accelerate time-to-value, fusionAIx offers proprietary accelerators and solution components including fxAgentSDK, fxAIStudio, fxMockUpToView, and fxSmartDCO. These tools enable rapid development, intelligent automation, and streamlined project delivery.
+
+We support clients across diverse industries including Insurance, Banking & Finance, Government & Public Sector, Automotive & Fleet Management, and Travel & Tourism, combining platform expertise with structured knowledge transfer to help customers build sustainable, future-ready capabilities."""
 }
 
 
@@ -36,19 +40,6 @@ def generate_rfp_pdf(
     rfp_title: Optional[str] = None,
     output_path: Optional[Path] = None,
 ) -> bytes:
-    """
-    Generate a formatted PDF document from RFP responses.
-    
-    Args:
-        individual_responses: List of individual requirement responses
-        requirements_result: RequirementsResult containing all requirements
-        extraction_result: ExtractionResult with RFP metadata
-        rfp_title: Optional title for the RFP (defaults to extraction-based title)
-        output_path: Optional path to save PDF (if None, returns bytes)
-    
-    Returns:
-        PDF bytes if output_path is None, otherwise writes to file
-    """
     logger.info(
         "Generating PDF document: %d requirement responses",
         len(individual_responses),
@@ -59,23 +50,16 @@ def generate_rfp_pdf(
     project_root = Path(__file__).parent.parent.parent
     
     def format_response_text(text: str) -> str:
-        """Convert markdown-style text to HTML, avoiding duplication."""
         if not text:
             return ""
         
-        # First, convert headers (process from most specific to least)
         text = re.sub(r'^#### (.*?)$', r'<h4>\1</h4>', text, flags=re.MULTILINE)
         text = re.sub(r'^### (.*?)$', r'<h3>\1</h3>', text, flags=re.MULTILINE)
         text = re.sub(r'^## (.*?)$', r'<h2>\1</h2>', text, flags=re.MULTILINE)
         text = re.sub(r'^# (.*?)$', r'<h2>\1</h2>', text, flags=re.MULTILINE)
         
-        # Convert bold
         text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
         
-        # Convert markdown tables to HTML tables
-        # Pattern: | Header1 | Header2 | Header3 |
-        #          |---------|---------|---------|
-        #          | Cell1   | Cell2   | Cell3   |
         lines = text.split('\n')
         formatted_lines = []
         in_table = False
@@ -87,10 +71,8 @@ def generate_rfp_pdf(
             line = lines[i]
             stripped = line.strip()
             
-            # Handle empty lines - close table if in one
             if not stripped:
                 if in_table and table_rows:
-                    # Close the table
                     formatted_lines.append('<table>')
                     if header_row:
                         formatted_lines.append('<thead><tr>')
@@ -111,49 +93,40 @@ def generate_rfp_pdf(
                 i += 1
                 continue
             
-            # Check if this is a table row (contains |)
             if '|' in stripped and not stripped.startswith('#'):
-                # Check if next line is a separator (contains --- or ===)
                 if i + 1 < len(lines):
                     next_line = lines[i + 1].strip()
                     if re.match(r'^[\|\s:\-]+$', next_line):
-                        # This is a header row, next is separator
                         cells = [cell.strip() for cell in stripped.split('|') if cell.strip()]
                         if cells:
                             header_row = cells
-                            i += 2  # Skip separator line
+                            i += 2
                             in_table = True
                             table_rows = []
                             continue
                 
-                # Regular table row
                 if in_table:
                     cells = [cell.strip() for cell in stripped.split('|') if cell.strip()]
                     if cells:
                         table_rows.append(cells)
                     i += 1
                     continue
-                # Not in table yet, might be starting one
                 elif i + 1 < len(lines):
                     next_line = lines[i + 1].strip()
                     if re.match(r'^[\|\s:\-]+$', next_line):
-                        # Starting a new table
                         cells = [cell.strip() for cell in stripped.split('|') if cell.strip()]
                         if cells:
                             header_row = cells
-                            i += 2  # Skip separator line
+                            i += 2
                             in_table = True
                             table_rows = []
                             continue
                 
-                # Not a table, process normally
                 formatted_lines.append(stripped)
                 i += 1
                 continue
             else:
-                # Not a table line
                 if in_table and table_rows:
-                    # Close the table
                     formatted_lines.append('<table>')
                     if header_row:
                         formatted_lines.append('<thead><tr>')
@@ -174,7 +147,6 @@ def generate_rfp_pdf(
                 formatted_lines.append(stripped)
                 i += 1
         
-        # Close any open table
         if in_table and table_rows:
             formatted_lines.append('<table>')
             if header_row:
@@ -192,16 +164,14 @@ def generate_rfp_pdf(
         
         text = '\n'.join(formatted_lines)
         
-        # Process lines for lists and paragraphs
         lines = text.split('\n')
         formatted_lines = []
         in_list = False
-        list_type = None  # 'ul' or 'ol'
+        list_type = None
         
         for line in lines:
             stripped = line.strip()
             
-            # Skip empty lines (they'll be handled by paragraph spacing)
             if not stripped:
                 if in_list:
                     formatted_lines.append(f'</{list_type}>')
@@ -209,7 +179,6 @@ def generate_rfp_pdf(
                     list_type = None
                 continue
             
-            # Check if line is already a header (from previous processing)
             if stripped.startswith('<h'):
                 if in_list:
                     formatted_lines.append(f'</{list_type}>')
@@ -218,7 +187,6 @@ def generate_rfp_pdf(
                 formatted_lines.append(stripped)
                 continue
             
-            # Check for bullet list
             if stripped.startswith('- ') or stripped.startswith('* '):
                 if not in_list or list_type != 'ul':
                     if in_list:
@@ -228,7 +196,6 @@ def generate_rfp_pdf(
                     list_type = 'ul'
                 content = stripped[2:].strip()
                 formatted_lines.append(f'<li>{content}</li>')
-            # Check for numbered list
             elif re.match(r'^\d+\.\s+', stripped):
                 if not in_list or list_type != 'ol':
                     if in_list:
@@ -239,26 +206,21 @@ def generate_rfp_pdf(
                 match = re.match(r'^\d+\.\s*(.*)', stripped)
                 if match:
                     formatted_lines.append(f'<li>{match.group(1)}</li>')
-            # Regular paragraph
             else:
                 if in_list:
                     formatted_lines.append(f'</{list_type}>')
                     in_list = False
                     list_type = None
-                # Only wrap in <p> if not already HTML
                 if not stripped.startswith('<'):
                     formatted_lines.append(f'<p>{stripped}</p>')
                 else:
                     formatted_lines.append(stripped)
         
-        # Close any open list
         if in_list:
             formatted_lines.append(f'</{list_type}>')
         
         result = '\n'.join(formatted_lines)
-        # Clean up excessive breaks
         result = re.sub(r'(<br>\s*){3,}', '<br><br>', result)
-        # Remove empty paragraphs
         result = re.sub(r'<p>\s*</p>', '', result)
         return result
     

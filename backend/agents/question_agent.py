@@ -20,7 +20,6 @@ def _build_rag_context_for_requirement(
     rag_system: Optional[RAGSystem],
     max_chunks: int = 3,
 ) -> str:
-    """Retrieve RAG chunks relevant to this requirement for gap analysis."""
     if rag_system is None:
         return ""
 
@@ -59,27 +58,17 @@ def _build_rag_context_for_requirement(
 
 
 def _is_question_covered_by_rag(question_text: str, rag_context: str) -> bool:
-    """
-    Heuristic check: does the RAG context already appear to contain the information
-    this question is asking for?
-    
-    We treat RAG as authoritative: if the overlap of content words is high enough,
-    we assume the question is already answered and should NOT be asked.
-    """
     if not rag_context or not question_text:
         return False
 
     qt = question_text.lower()
     rc = rag_context.lower()
 
-    # Extract content-ish words (length > 4) from the question
     words = [w for w in re.findall(r"\w+", qt) if len(w) > 4]
     if not words:
         return False
 
     overlap = sum(1 for w in words if w in rc)
-    # If at least 2 content words from the question appear in the RAG context,
-    # assume the question is already answered there.
     return overlap >= 2
 
 
@@ -89,31 +78,18 @@ def generate_questions(
     company_kb: CompanyKnowledgeBase,
     rag_system: Optional[RAGSystem] = None,
 ) -> List[Dict[str, Any]]:
-    """
-    Generate questions for unknown information in a requirement.
-    
-    Args:
-        requirement: The requirement to analyze
-        all_requirements: All requirements for context
-        company_kb: Company knowledge base to check against
-        
-    Returns:
-        List of question dictionaries with question_text, context, category, priority
-    """
     logger.info(
         "Question agent: analyzing requirement %s for information gaps",
         requirement.id,
     )
     
-    # Check what we know from hardcoded KB and RAG
     known_topics = company_kb.get_all_known_topics()
     known_info_text = company_kb.format_for_prompt()
     rag_context = _build_rag_context_for_requirement(requirement, rag_system)
     
-    # Build context from all requirements
     all_req_text = "\n\n".join([
         f"[{req.id}] {req.source_text}"
-        for req in all_requirements[:10]  # Limit to first 10 for context
+        for req in all_requirements[:10]
     ])
     
     user_prompt = f"""Analyze the following requirement and identify ONLY the information that is MISSING or UNCLEAR that would be absolutely critical to create a proper response.
@@ -156,12 +132,10 @@ If no questions are needed (all information is clear, in knowledge base, or any 
             max_tokens=1500,
         )
         
-        # Parse JSON response
         cleaned = content.replace("```json", "").replace("```", "").strip()
         try:
             questions = json.loads(cleaned)
         except json.JSONDecodeError:
-            # Try to extract JSON array
             import re
             array_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
             if array_match:
@@ -170,14 +144,12 @@ If no questions are needed (all information is clear, in knowledge base, or any 
                 logger.warning("Could not parse questions JSON, returning empty list")
                 questions = []
         
-        # Validate questions
         if not isinstance(questions, list):
             questions = []
         
         validated_questions = []
         for q in questions:
             if isinstance(q, dict) and "question_text" in q:
-                # Ensure all required fields
                 validated_q = {
                     "question_text": q.get("question_text", ""),
                     "context": q.get("context", ""),
@@ -187,7 +159,6 @@ If no questions are needed (all information is clear, in knowledge base, or any 
                 if validated_q["question_text"]:
                     validated_questions.append(validated_q)
         
-        # Filter out questions where RAG already appears to contain the answer
         rag_filtered_questions: List[Dict[str, Any]] = []
         for q in validated_questions:
             if rag_context and _is_question_covered_by_rag(q["question_text"], rag_context):
@@ -199,15 +170,12 @@ If no questions are needed (all information is clear, in knowledge base, or any 
                 continue
             rag_filtered_questions.append(q)
         
-        # Filter out questions about known topics (company KB)
         filtered_questions = []
         for q in rag_filtered_questions:
             question_text = q["question_text"].lower()
-            # Check if question is about something we know
             should_skip = False
             for topic in known_topics:
                 if topic.lower() in question_text:
-                    # Double-check with KB
                     if company_kb.has_info(topic):
                         logger.debug("Skipping question about known topic: %s", topic)
                         should_skip = True
@@ -215,14 +183,12 @@ If no questions are needed (all information is clear, in knowledge base, or any 
             if not should_skip:
                 filtered_questions.append(q)
         
-        # Be extra strict: keep only the most important questions.
         priority_order = {"high": 0, "medium": 1, "low": 2}
         filtered_questions.sort(key=lambda q: priority_order.get(q.get("priority", "medium"), 1))
 
-        # Prefer only high‑priority questions; if none are high, allow at most one medium.
         high_only = [q for q in filtered_questions if q.get("priority", "medium") == "high"]
         if high_only:
-            selected = high_only[:2]  # hard cap: max 2 questions per requirement
+            selected = high_only[:2]
         else:
             selected = filtered_questions[:1] if filtered_questions else []
 
@@ -249,38 +215,22 @@ def analyze_build_query_for_questions(
     max_questions_per_requirement: int = 3,
     rag_system: Optional[RAGSystem] = None,
 ) -> tuple[List[Dict[str, Any]], Dict[str, str]]:
-    """
-    Analyze each requirement individually and generate questions about missing information.
-    
-    Args:
-        build_query: The build query containing all requirements
-        requirements_result: The requirements result with individual requirements
-        company_kb: Company knowledge base
-        max_questions_per_requirement: Maximum questions per requirement
-        
-    Returns:
-        List of questions (as dictionaries) with requirement_id
-    """
     logger.info("Analyzing requirements individually for information gaps")
     
-    # Get company knowledge summary
     known_info_text = company_kb.format_for_prompt()
     
     all_questions: List[Dict[str, Any]] = []
     rag_contexts_by_req: Dict[str, str] = {}
     
-    # Analyze each solution requirement individually
     for req in requirements_result.solution_requirements:
         logger.info("Analyzing requirement %s for information gaps", req.id)
         
-        # Build context from other requirements
         other_reqs_text = "\n".join([
             f"[{r.id}] {r.source_text}"
             for r in requirements_result.solution_requirements
             if r.id != req.id
         ])
         
-        # Build RAG context for this requirement so the model can see what is already known
         rag_context = _build_rag_context_for_requirement(req, rag_system)
         if rag_context:
             rag_contexts_by_req[req.id] = rag_context
@@ -350,7 +300,6 @@ If all information needed to answer this requirement is already available in the
                 max_tokens=1500,
             )
             
-            # Parse JSON response
             questions = []
             try:
                 response_text = response.strip()
@@ -372,7 +321,6 @@ If all information needed to answer this requirement is already available in the
                 logger.debug("Response was: %s", response[:500])
                 continue
             
-            # Validate, apply RAG-based filtering, and add requirement_id to each question
             for q in questions:
                 if isinstance(q, dict) and "question_text" in q:
                     q_text = q.get("question_text", "")
@@ -388,18 +336,15 @@ If all information needed to answer this requirement is already available in the
                         "context": q.get("context", ""),
                         "category": q.get("category", "general"),
                         "priority": q.get("priority", "medium"),
-                        "requirement_id": req.id,  # Link question to requirement
+                        "requirement_id": req.id,
                     }
                     if validated_q["question_text"]:
                         all_questions.append(validated_q)
             
-            # Limit questions per requirement
             req_questions = [q for q in all_questions if q.get("requirement_id") == req.id]
             if len(req_questions) > max_questions_per_requirement:
-                # Keep only the highest priority questions for this requirement
                 priority_order = {"high": 0, "medium": 1, "low": 2}
                 req_questions.sort(key=lambda q: priority_order.get(q.get("priority", "medium"), 1))
-                # Remove excess questions
                 excess = req_questions[max_questions_per_requirement:]
                 for ex_q in excess:
                     all_questions.remove(ex_q)
@@ -415,16 +360,13 @@ If all information needed to answer this requirement is already available in the
             logger.exception("Full traceback:")
             continue
     
-    # Filter out questions about known topics
     filtered_questions = []
     known_topics = company_kb.get_all_known_topics()
     for q in all_questions:
         question_text = q["question_text"].lower()
-        # Check if question is about something we know
         should_skip = False
         for topic in known_topics:
             if topic.lower() in question_text:
-                # Double-check with KB
                 if company_kb.has_info(topic):
                     logger.debug("Skipping question about known topic: %s", topic)
                     should_skip = True
@@ -432,11 +374,10 @@ If all information needed to answer this requirement is already available in the
         if not should_skip:
             filtered_questions.append(q)
     
-    # Sort by priority and requirement order
     priority_order = {"high": 0, "medium": 1, "low": 2}
     filtered_questions.sort(key=lambda q: (
         priority_order.get(q.get("priority", "medium"), 1),
-        q.get("requirement_id", ""),  # Group by requirement
+        q.get("requirement_id", ""),
     ))
     
     logger.info(
@@ -454,10 +395,6 @@ def analyze_build_query_for_questions_legacy(
     company_kb: CompanyKnowledgeBase,
     max_questions: int = 20,
 ) -> List[Dict[str, Any]]:
-    """
-    Legacy function: Analyze build query as a whole (used when requirements are not available).
-    Prefer analyze_build_query_for_questions with requirements_result for better per-requirement analysis.
-    """
     logger.info("Analyzing build query as whole (legacy mode)")
     
     known_info_text = company_kb.format_for_prompt()
@@ -526,7 +463,6 @@ Output a JSON array of questions, each with:
                 if validated_q["question_text"]:
                     validated_questions.append(validated_q)
         
-        # Filter out questions about known topics
         filtered_questions = []
         known_topics = company_kb.get_all_known_topics()
         for q in validated_questions:
@@ -559,22 +495,10 @@ def analyze_requirements_for_questions(
     max_questions_per_requirement: int = 2,
     rag_system: Optional[RAGSystem] = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Analyze multiple requirements and generate questions for each.
-    
-    Args:
-        requirements: List of requirements to analyze
-        company_kb: Company knowledge base
-        max_questions_per_requirement: Maximum questions per requirement
-        
-    Returns:
-        Dictionary mapping requirement_id to list of questions
-    """
     all_questions = {}
     
     for req in requirements:
         questions = generate_questions(req, requirements, company_kb, rag_system=rag_system)
-        # Limit questions per requirement (generate_questions is already strict, this is an extra safety cap)
         questions = questions[:max_questions_per_requirement]
         all_questions[req.id] = questions
     
@@ -593,12 +517,6 @@ def infer_answered_questions_from_answer(
     answer_text: str,
     remaining_questions: List[Question],
 ) -> List[str]:
-    """
-    Given a newly answered question and its answer, infer which of the remaining
-    questions are now fully answered by the same answer.
-
-    Returns a list of question_id values that can be marked as answered.
-    """
     if not remaining_questions or not answer_text.strip():
         return []
 
@@ -682,7 +600,6 @@ REMAINING OPEN QUESTIONS:
             )
             return []
 
-        # Keep only IDs that correspond to actually remaining questions
         remaining_ids = {q.question_id for q in remaining_questions}
         inferred_ids = [
             qid for qid in result if isinstance(qid, str) and qid in remaining_ids

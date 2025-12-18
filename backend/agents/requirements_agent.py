@@ -166,7 +166,6 @@ def _run_requirements_agent_cached(essential_text: str) -> RequirementsResult:
     logger.info("Requirements agent: Processing %d solution requirements", len(solution_raw))
     for idx, req_dict in enumerate(solution_raw):
         try:
-            # Remove normalized_text if present (legacy field, no longer used)
             req_dict = {k: v for k, v in req_dict.items() if k != "normalized_text"}
             solution_reqs.append(RequirementItem(**req_dict))
         except Exception as e:
@@ -177,7 +176,6 @@ def _run_requirements_agent_cached(essential_text: str) -> RequirementsResult:
     logger.info("Requirements agent: Processing %d response structure requirements", len(response_raw))
     for idx, req_dict in enumerate(response_raw):
         try:
-            # Remove normalized_text if present (legacy field, no longer used)
             req_dict = {k: v for k, v in req_dict.items() if k != "normalized_text"}
             response_reqs.append(RequirementItem(**req_dict))
         except Exception as e:

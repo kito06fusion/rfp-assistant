@@ -1,0 +1,78 @@
+.app-header {
+  width: 100%;
+  padding: 1.5rem 0 1rem;
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  animation: headerFadeIn 400ms ease-out;
+}
+
+@keyframes headerFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 1480px;
+  padding: 0 1.75rem;
+}
+
+.header-logo-link {
+  display: inline-block;
+  text-decoration: none;
+  transition: transform var(--transition-med);
+}
+
+.header-logo {
+  height: 3.5rem;
+  width: auto;
+  object-fit: contain;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: smooth;
+  image-rendering: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  filter: drop-shadow(0 4px 12px rgba(37, 99, 235, 0.2));
+  transition: filter var(--transition-med);
+  display: block;
+  will-change: transform, filter;
+}
+
+.header-logo-link:hover .header-logo {
+  transform: translateY(-2px) scale(1.02);
+  filter: drop-shadow(0 6px 16px rgba(37, 99, 235, 0.35));
+}
+
+.header-logo-link:hover {
+  transform: translateY(-2px);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .header-logo {
+    height: 2.8rem;
+  }
+  
+  .app-header {
+    padding: 1rem 0 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .header-logo {
+    height: 2.2rem;
+  }
+}

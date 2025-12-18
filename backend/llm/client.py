@@ -10,7 +10,7 @@ from openai import APITimeoutError
 logger = logging.getLogger(__name__)
 
 HF_BASE_URL = "https://router.huggingface.co/v1"
-REQUEST_TIMEOUT = 120.0  # Export for use in other modules
+REQUEST_TIMEOUT = 120.0
 
 load_dotenv()
 

@@ -306,7 +306,7 @@ class RAGSystem:
         logger.info("Creating FAISS index...")
         index_start_time = time.time()
         dimension = embeddings.shape[1]
-        self.index = faiss.IndexFlatL2(dimension)  # L2 distance
+        self.index = faiss.IndexFlatL2(dimension)
         self.index.add(embeddings)
         index_elapsed = time.time() - index_start_time
         

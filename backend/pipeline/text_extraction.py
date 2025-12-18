@@ -231,7 +231,6 @@ def _extract_text_from_excel_direct(excel_path: Path) -> str:
             df = xls.parse(sheet_name)
             if not df.empty:
                 text_parts.append(f"=== Sheet: {sheet_name} ===")
-                # Convert the dataframe to a simple text table (no index)
                 text_parts.append(df.to_string(index=False))
 
         full_text = "\n\n".join(text_parts)

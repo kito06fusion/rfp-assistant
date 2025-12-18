@@ -55,12 +55,10 @@ def _parse_markdown_to_docx(doc, text: str):
     if not text:
         return
     
-    # Pre-process: remove standalone horizontal rules and clean up
     lines = text.split('\n')
     cleaned_lines = []
     for line in lines:
         stripped = line.strip()
-        # Skip horizontal rules
         if re.match(r'^---+$', stripped):
             continue
         cleaned_lines.append(line)
@@ -83,7 +81,7 @@ def _parse_markdown_to_docx(doc, text: str):
                 header_row = None
                 current_table = None
             else:
-                doc.add_paragraph()  # Add spacing
+                doc.add_paragraph()
             i += 1
             continue
         
@@ -102,13 +100,12 @@ def _parse_markdown_to_docx(doc, text: str):
                             try:
                                 current_table.style = 'Grid Table 1 Light'
                             except:
-                                pass  # Use default style
+                                pass
                         
                         header_cells = current_table.rows[0].cells
                         for col_idx, cell_text in enumerate(cells):
                             cell = header_cells[col_idx]
                             cell.text = cell_text
-                            # Make header bold and set style
                             for paragraph in cell.paragraphs:
                                 for run in paragraph.runs:
                                     run.bold = True
@@ -127,10 +124,9 @@ def _parse_markdown_to_docx(doc, text: str):
                         
                         in_table = True
                         table_rows = []
-                        i += 2  # Skip separator line
+                        i += 2
                         continue
             
-            # Regular table row
             if in_table and current_table:
                 cells = [cell.strip() for cell in stripped.split('|') if cell.strip()]
                 if cells:
@@ -138,14 +134,12 @@ def _parse_markdown_to_docx(doc, text: str):
                     for col_idx, cell_text in enumerate(cells):
                         if col_idx < len(row.cells):
                             cell = row.cells[col_idx]
-                            # Clear default content and add formatted text
                             cell.text = ""  # Clear first
                             para = cell.paragraphs[0]
                             _add_formatted_text_to_paragraph(para, cell_text)
                     table_rows.append(cells)
                 i += 1
                 continue
-            # Not in table yet, might be starting one
             elif i + 1 < len(lines):
                 next_line = lines[i + 1].strip()
                 if re.match(r'^[\|\s:\-]+$', next_line):
@@ -160,7 +154,7 @@ def _parse_markdown_to_docx(doc, text: str):
                             try:
                                 current_table.style = 'Grid Table 1 Light'
                             except:
-                                pass  # Use default style
+                                pass
                         
                         header_cells = current_table.rows[0].cells
                         for col_idx, cell_text in enumerate(cells):
@@ -180,7 +174,7 @@ def _parse_markdown_to_docx(doc, text: str):
                         
                         in_table = True
                         table_rows = []
-                        i += 2  # Skip separator line
+                        i += 2
                         continue
             
             _add_text_line(doc, stripped)
@@ -204,26 +198,20 @@ def _parse_markdown_to_docx(doc, text: str):
 
 
 def _clean_markdown_text(text: str) -> str:
-    """Remove markdown formatting from text while preserving content."""
     if not text:
         return text
-    # Remove bold markers (but keep the content)
+
     text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
-    text = re.sub(r'\*\*([^*]*)\*\*', r'\1', text)  # Handle empty bold
-    # Remove italic markers
+    text = re.sub(r'\*\*([^*]*)\*\*', r'\1', text)
     text = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'\1', text)
-    # Remove code markers
     text = re.sub(r'`([^`]+)`', r'\1', text)
-    # Remove horizontal rules
     text = re.sub(r'^---+$', '', text, flags=re.MULTILINE)
-    # Clean up extra whitespace but preserve sentence structure
     text = re.sub(r'[ \t]+', ' ', text)
     text = text.strip()
     return text
 
 
 def _capitalize_sentence(text: str) -> str:
-    """Capitalize first letter of sentence if needed."""
     if not text:
         return text
     text = text.strip()
@@ -238,11 +226,9 @@ def _add_text_line(doc, line: str):
         doc.add_paragraph()
         return
     
-    # Skip horizontal rules
     if re.match(r'^---+$', stripped):
         return
     
-    # Handle headers - clean markdown first
     if stripped.startswith('#### '):
         header_text = _clean_markdown_text(stripped[5:])
         if header_text:
@@ -270,11 +256,8 @@ def _add_text_line(doc, line: str):
         content = _capitalize_sentence(content)
         _add_formatted_text_to_paragraph(para, content)
     else:
-        # Regular paragraph - clean and capitalize
         content = _clean_markdown_text(stripped)
         if content:
-            # Only capitalize if it looks like the start of a sentence
-            # (not if it's already capitalized or starts with a number/special char)
             if content and len(content) > 0 and content[0].islower() and content[0].isalpha():
                 content = _capitalize_sentence(content)
             para = doc.add_paragraph()
@@ -309,34 +292,29 @@ def generate_rfp_docx(
     company_para = doc.add_paragraph("fusionAIx")
     company_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    website_para = doc.add_paragraph("fusionaix.com")
+    website_para = doc.add_paragraph("www.fusionaix.com")
     website_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     doc.add_page_break()
     
     doc.add_heading("Table of Contents", 1)
     
-    # Check if this is a structured response
     is_structured = len(individual_responses) == 1 and individual_responses[0].get('requirement_id') == 'STRUCTURED'
     
     if is_structured:
-        # For structured responses, extract sections from the response text
         response_text = individual_responses[0].get('response', '')
         toc_para = doc.add_paragraph()
         
-        # Extract section headers from response (prioritize ## headers, fallback to ###)
         sections = []
         seen_sections = set()
         for line in response_text.split('\n'):
             stripped = line.strip()
-            # Look for main sections (##) first
             if stripped.startswith('## ') and not stripped.startswith('###'):
                 section_name = _clean_markdown_text(stripped[3:])
                 if section_name and section_name not in seen_sections:
                     sections.append(section_name)
                     seen_sections.add(section_name)
         
-        # If no ## headers found, look for ### headers
         if not sections:
             for line in response_text.split('\n'):
                 stripped = line.strip()
@@ -352,11 +330,9 @@ def generate_rfp_docx(
                 if idx < len(sections):
                     toc_para.add_run("\n")
         else:
-            # Fallback: use key_phrase or first part of response
             key_phrase = individual_responses[0].get('key_phrase', 'Structured Response')
             toc_para.add_run(f"1. {key_phrase}").bold = False
     else:
-        # For per-requirement responses
         toc_para = doc.add_paragraph()
         for idx, resp in enumerate(individual_responses, 1):
             req_id = resp.get('requirement_id', f'Requirement {idx}')
@@ -372,34 +348,32 @@ def generate_rfp_docx(
     doc.add_page_break()
     
     doc.add_heading("Company Overview", 1)
-    # Use the same detailed overview as PDF generator
-    overview_text = """fusionAIx is a specialized low-code and AI-driven digital transformation partner focused on modernizing enterprise workflows, improving customer/employee experiences, and accelerating delivery through platform-led automation. The company was established in 2023, with active entities including a UK-based consultancy (incorporated 3 August 2023) and an India-based technology arm (incorporated 20 July 2023).
+    overview_text = """At fusionAIx, we believe that the future of digital transformation lies in the seamless blend of low-code platforms and artificial intelligence. Our core team brings together decades of implementation experience, domain expertise, and a passion for innovation. We partner with enterprises to reimagine processes, accelerate application delivery, and unlock new levels of efficiency. We help businesses scale smarter, faster, and with greater impact.
 
-With proven capabilities across Pega Constellation, Microsoft Power Platform, and ServiceNow, fusionAIx provides advisory, modernization, implementation, and managed delivery services designed to meet enterprise requirements for scalability, security, and governance.
+With a collaborative spirit and a commitment to excellence, our team transforms complex challenges into intelligent, practical solutions. fusionAIx is not just about technology—it's about empowering people, industries, and enterprises to thrive in a digital-first world.
 
-In the Pega ecosystem, fusionAIx positions itself as a niche Constellation specialist and states it has delivered 20+ Pega Constellation implementations globally. The company also highlights an AI-powered Constellation Center of Excellence aimed at accelerating DX component creation and modernization outcomes.
+We are proud to be officially recognized as a Great Place To Work® Certified Company for 2025–26, reflecting our commitment to a culture built on trust, innovation, and people-first values.
 
-To speed time-to-value, fusionAIx offers proprietary accelerators and solution components such as fxAgentSDK, fxAIStudio, fxMockUpToView, and fxSmartDCO, alongside Pega Marketplace offerings like fxTranslate for Constellation localization support.
+fusionAIx delivers tailored solutions that blend AI and automation to drive measurable results across industries. We are a niche Pega partner with 20+ successful Pega Constellation implementations across the globe. As Constellation migration experts, we focus on pattern-based development with Constellation, enabling faster project go-lives than traditional implementation approaches.
 
-The firm supports clients across industries including insurance, banking/financial services, government, and healthcare, combining platform expertise with structured knowledge transfer to help customers build sustainable, future-ready capabilities."""
+Our proven capabilities span three core technology platforms: Pega Constellation, Microsoft Power Platform, and ServiceNow. Through these platforms, we provide comprehensive services including Low Code/No Code development, Digital Process Transformation, and AI & Data solutions.
+
+To accelerate time-to-value, fusionAIx offers proprietary accelerators and solution components including fxAgentSDK, fxAIStudio, fxMockUpToView, and fxSmartDCO. These tools enable rapid development, intelligent automation, and streamlined project delivery.
+
+We support clients across diverse industries including Insurance, Banking & Finance, Government & Public Sector, Automotive & Fleet Management, and Travel & Tourism, combining platform expertise with structured knowledge transfer to help customers build sustainable, future-ready capabilities."""
     
-    # Split into paragraphs for better formatting
     for para_text in overview_text.split('\n\n'):
         if para_text.strip():
             doc.add_paragraph(para_text.strip())
     
     doc.add_page_break()
     
-    # Check if this is a structured response
     is_structured = len(individual_responses) == 1 and individual_responses[0].get('requirement_id') == 'STRUCTURED'
     
     if is_structured:
-        # For structured responses, the response text already contains all sections with headers
-        # No need for "Solution Requirement Responses" heading - sections are in the response
         response_text = individual_responses[0].get('response', '')
         _parse_markdown_to_docx(doc, response_text)
     else:
-        # For per-requirement responses, add the section heading
         doc.add_heading("Solution Requirement Responses", 1)
         for idx, resp_data in enumerate(individual_responses, 1):
             req_heading = doc.add_heading(f"Requirement {idx}: {resp_data.get('requirement_id', 'N/A')}", 2)
@@ -420,7 +394,7 @@ The firm supports clients across industries including insurance, banking/financi
                 quality_para.add_run(f"Completeness: {quality.get('completeness', 'unknown')} | ")
                 quality_para.add_run(f"Relevance: {quality.get('relevance', 'unknown')}")
             
-            doc.add_paragraph()  # Spacing
+            doc.add_paragraph()
     
     if output_path:
         output_path = Path(output_path)

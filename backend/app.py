@@ -161,7 +161,7 @@ def validate_before_generation(
     
     if not requirements_result.solution_requirements:
         errors.append("No solution requirements found")
-        return errors  # Early return - can't proceed without requirements
+        return errors
     
     for idx, req in enumerate(requirements_result.solution_requirements, 1):
         if not req.id or not req.id.strip():
@@ -369,7 +369,6 @@ class RequirementsRequest(BaseModel):
 
 
 class UpdateRequirementsRequest(BaseModel):
-    """Manual edits to requirements before build-query."""
     requirements: Dict[str, Any]
 
 @app.post("/run-requirements")
@@ -456,7 +455,7 @@ class GenerateResponseRequest(BaseModel):
     requirements: Dict[str, Any]
     use_rag: bool = True
     num_retrieval_chunks: int = 5
-    session_id: Optional[str] = None  # Chat session ID for Q&A context
+    session_id: Optional[str] = None
 
 
 @app.post("/generate-response")
@@ -945,7 +944,6 @@ async def _generate_per_requirement_response(
             "=" * 80
         )
         
-        # Always generate an editable Word (DOCX) document
         logger.info("Generating DOCX document...")
         try:
             from backend.document_formatter import generate_rfp_docx
@@ -1414,7 +1412,6 @@ async def preview_responses_endpoint(req: PreviewResponseRequest) -> Dict[str, A
         
         rag_system, knowledge_base = _setup_rag_and_kb(req.use_rag)
         
-        # Get Q&A context
         qa_context = ""
         if req.session_id and req.session_id in _conversation_sessions:
             context = _conversation_sessions[req.session_id]

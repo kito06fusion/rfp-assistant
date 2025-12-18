@@ -24,7 +24,7 @@ class CaseStudy:
     solution: str
     technologies_used: List[str]
     outcomes: List[str]
-    relevance_keywords: List[str]  # Keywords for matching to requirements
+    relevance_keywords: List[str]
 
 
 @dataclass
@@ -45,7 +45,6 @@ class FusionAIxKnowledgeBase:
         self.key_differentiators = self._get_key_differentiators()
     
     def _load_capabilities(self) -> List[Capability]:
-        """Load fusionAIx capabilities."""
         return [
             Capability(
                 name="Pega Constellation Expertise",
@@ -54,7 +53,7 @@ class FusionAIxKnowledgeBase:
                     "Deep knowledge of Constellation architecture, DX components, and modernization strategies."
                 ),
                 technologies=["Pega Constellation", "Pega Platform", "DX Components"],
-                industries=["Insurance", "Banking", "Financial Services", "Government", "Healthcare"],
+                industries=["Insurance", "Banking & Finance", "Government & Public Sector", "Automotive & Fleet Management", "Travel & Tourism"],
                 key_differentiators=[
                     "20+ Pega Constellation implementations globally",
                     "AI-powered Constellation Center of Excellence",
@@ -69,7 +68,7 @@ class FusionAIxKnowledgeBase:
                     "Power Automate, Power BI, and Power Virtual Agents."
                 ),
                 technologies=["Power Apps", "Power Automate", "Power BI", "Power Virtual Agents"],
-                industries=["Insurance", "Banking", "Financial Services", "Government", "Healthcare"],
+                industries=["Insurance", "Banking & Finance", "Government & Public Sector", "Automotive & Fleet Management", "Travel & Tourism"],
                 key_differentiators=[
                     "End-to-end Power Platform solutions",
                     "Integration with existing enterprise systems",
@@ -83,7 +82,7 @@ class FusionAIxKnowledgeBase:
                     "for IT service management, workflow automation, and digital transformation."
                 ),
                 technologies=["ServiceNow", "ITSM", "Workflow Automation"],
-                industries=["Insurance", "Banking", "Financial Services", "Government", "Healthcare"],
+                industries=["Insurance", "Banking & Finance", "Government & Public Sector", "Automotive & Fleet Management", "Travel & Tourism"],
                 key_differentiators=[
                     "ServiceNow certified expertise",
                     "Custom application development",
@@ -97,7 +96,7 @@ class FusionAIxKnowledgeBase:
                     "and digital transformation with reduced time-to-market."
                 ),
                 technologies=["Low-Code Platforms", "Rapid Application Development"],
-                industries=["Insurance", "Banking", "Financial Services", "Government", "Healthcare"],
+                industries=["Insurance", "Banking & Finance", "Government & Public Sector", "Automotive & Fleet Management", "Travel & Tourism"],
                 key_differentiators=[
                     "Accelerated delivery through platform-led automation",
                     "Proven low-code methodologies",
@@ -111,7 +110,7 @@ class FusionAIxKnowledgeBase:
                     "and AI-enhanced development capabilities."
                 ),
                 technologies=["AI/ML", "Intelligent Automation", "AI Studio"],
-                industries=["Insurance", "Banking", "Financial Services", "Government", "Healthcare"],
+                industries=["Insurance", "Banking & Finance", "Government & Public Sector", "Automotive & Fleet Management", "Travel & Tourism"],
                 key_differentiators=[
                     "AI-powered Constellation Center of Excellence",
                     "fxAIStudio for AI-enhanced development",
@@ -121,7 +120,6 @@ class FusionAIxKnowledgeBase:
         ]
     
     def _load_case_studies(self) -> List[CaseStudy]:
-        """Load fusionAIx case studies."""
         return [
             CaseStudy(
                 title="Pega Constellation Modernization - Insurance",
@@ -198,7 +196,6 @@ class FusionAIxKnowledgeBase:
         ]
     
     def _load_accelerators(self) -> List[Accelerator]:
-        """Load fusionAIx accelerators and tools."""
         return [
             Accelerator(
                 name="fxAgentSDK",
@@ -298,34 +295,35 @@ class FusionAIxKnowledgeBase:
         ]
     
     def _get_company_overview(self) -> str:
-        """Get company overview text."""
-        return """fusionAIx is a specialized low-code and AI-driven digital transformation partner focused on modernizing enterprise workflows, improving customer/employee experiences, and accelerating delivery through platform-led automation. The company was established in 2023, with active entities including a UK-based consultancy (incorporated 3 August 2023) and an India-based technology arm (incorporated 20 July 2023).
+        return """At fusionAIx, we believe that the future of digital transformation lies in the seamless blend of low-code platforms and artificial intelligence. Our core team brings together decades of implementation experience, domain expertise, and a passion for innovation. We partner with enterprises to reimagine processes, accelerate application delivery, and unlock new levels of efficiency. We help businesses scale smarter, faster, and with greater impact.
 
-With proven capabilities across Pega Constellation, Microsoft Power Platform, and ServiceNow, fusionAIx provides advisory, modernization, implementation, and managed delivery services designed to meet enterprise requirements for scalability, security, and governance.
+With a collaborative spirit and a commitment to excellence, our team transforms complex challenges into intelligent, practical solutions. fusionAIx is not just about technology—it's about empowering people, industries, and enterprises to thrive in a digital-first world.
 
-In the Pega ecosystem, fusionAIx positions itself as a niche Constellation specialist and states it has delivered 20+ Pega Constellation implementations globally. The company also highlights an AI-powered Constellation Center of Excellence aimed at accelerating DX component creation and modernization outcomes.
+We are proud to be officially recognized as a Great Place To Work® Certified Company for 2025–26, reflecting our commitment to a culture built on trust, innovation, and people-first values.
 
-To speed time-to-value, fusionAIx offers proprietary accelerators and solution components such as fxAgentSDK, fxAIStudio, fxMockUpToView, and fxSmartDCO, alongside Pega Marketplace offerings like fxTranslate for Constellation localization support.
+fusionAIx delivers tailored solutions that blend AI and automation to drive measurable results across industries. We are a niche Pega partner with 20+ successful Pega Constellation implementations across the globe. As Constellation migration experts, we focus on pattern-based development with Constellation, enabling faster project go-lives than traditional implementation approaches.
 
-The firm supports clients across industries including insurance, banking/financial services, government, and healthcare, combining platform expertise with structured knowledge transfer to help customers build sustainable, future-ready capabilities."""
+Our proven capabilities span three core technology platforms: Pega Constellation, Microsoft Power Platform, and ServiceNow. Through these platforms, we provide comprehensive services including Low Code/No Code development, Digital Process Transformation, and AI & Data solutions.
+
+To accelerate time-to-value, fusionAIx offers proprietary accelerators and solution components including fxAgentSDK, fxAIStudio, fxMockUpToView, and fxSmartDCO. These tools enable rapid development, intelligent automation, and streamlined project delivery.
+
+We support clients across diverse industries including Insurance, Banking & Finance, Government & Public Sector, Automotive & Fleet Management, and Travel & Tourism, combining platform expertise with structured knowledge transfer to help customers build sustainable, future-ready capabilities."""
     
     def _get_key_differentiators(self) -> List[str]:
-        """Get key differentiators."""
         return [
-            "20+ Pega Constellation implementations globally",
-            "AI-powered Constellation Center of Excellence",
-            "Niche Constellation specialist positioning",
+            "Great Place To Work® Certified Company for 2025–26",
+            "20+ successful Pega Constellation implementations across the globe",
+            "Niche Pega partner with specialized Constellation expertise",
+            "Pattern-based development with Constellation for faster project go-lives",
             "Proprietary accelerators (fxAgentSDK, fxAIStudio, fxMockUpToView, fxSmartDCO)",
-            "Pega Marketplace offerings (fxTranslate)",
-            "Proven track record across insurance, banking, government, and healthcare",
-            "Established in 2023 with UK and India entities",
-            "Focus on platform-led automation and rapid delivery",
-            "Structured knowledge transfer and capability building",
-            "Combination of advisory, implementation, and managed delivery services"
+            "Decades of implementation experience and domain expertise",
+            "Seamless blend of low-code platforms and artificial intelligence",
+            "Proven track record across Insurance, Banking & Finance, Government & Public Sector, Automotive & Fleet Management, and Travel & Tourism",
+            "Comprehensive services: Low Code/No Code, Digital Process Transformation, and AI & Data",
+            "Commitment to empowering people, industries, and enterprises to thrive in a digital-first world"
         ]
     
     def get_relevant_capabilities(self, requirement_text: str) -> List[Capability]:
-        """Get capabilities relevant to a requirement."""
         requirement_lower = requirement_text.lower()
         relevant = []
         
@@ -340,7 +338,6 @@ The firm supports clients across industries including insurance, banking/financi
         return relevant if relevant else self.capabilities[:2]  # Return top 2 if no match
     
     def get_relevant_case_studies(self, requirement_text: str, max_results: int = 2) -> List[CaseStudy]:
-        """Get case studies relevant to a requirement."""
         requirement_lower = requirement_text.lower()
         scored_studies = []
         
@@ -362,7 +359,6 @@ The firm supports clients across industries including insurance, banking/financi
         return [study for _, study in scored_studies[:max_results]]
     
     def get_relevant_accelerators(self, requirement_text: str) -> List[Accelerator]:
-        """Get accelerators relevant to a requirement."""
         requirement_lower = requirement_text.lower()
         relevant = []
         
@@ -372,10 +368,9 @@ The firm supports clients across industries including insurance, banking/financi
             elif any(use_case.lower() in requirement_lower for use_case in accelerator.use_cases):
                 relevant.append(accelerator)
         
-        return relevant if relevant else self.accelerators[:2]  # Return top 2 if no match
+        return relevant if relevant else self.accelerators[:2]
     
     def format_for_prompt(self, requirement_text: str) -> str:
-        """Format knowledge base content for inclusion in LLM prompts."""
         parts = []
         
         parts.append("FUSIONAIX COMPANY OVERVIEW:")

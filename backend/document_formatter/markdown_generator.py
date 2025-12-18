@@ -1,9 +1,3 @@
-"""
-Markdown Generator for RFP Responses
-
-Generates Markdown format documents.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -23,35 +17,20 @@ def generate_rfp_markdown(
     rfp_title: Optional[str] = None,
     output_path: Optional[Path] = None,
 ) -> bytes:
-    """
-    Generate a Markdown document from RFP responses.
-    
-    Args:
-        individual_responses: List of individual requirement responses
-        requirements_result: RequirementsResult containing all requirements
-        extraction_result: ExtractionResult with RFP metadata
-        rfp_title: Optional title for the RFP
-        output_path: Optional path to save Markdown (if None, returns bytes)
-    
-    Returns:
-        Markdown bytes if output_path is None, otherwise writes to file
-    """
     logger.info("Generating Markdown document: %d requirement responses", len(individual_responses))
     
     lines = []
     
-    # Title
     title = rfp_title or f"RFP Response - {extraction_result.language.upper()}"
     lines.append(f"# {title}")
     lines.append("")
     lines.append(f"**Date:** {datetime.now().strftime('%B %d, %Y')}")
     lines.append("")
-    lines.append(f"**Company:** fusionAIx (fusionaix.com)")
+    lines.append(f"**Company:** fusionAIx (www.fusionaix.com)")
     lines.append("")
     lines.append("---")
     lines.append("")
     
-    # Table of Contents
     lines.append("## Table of Contents")
     lines.append("")
     for idx, resp in enumerate(individual_responses, 1):
@@ -62,15 +41,25 @@ def generate_rfp_markdown(
     lines.append("---")
     lines.append("")
     
-    # Company Overview
     lines.append("## Company Overview")
     lines.append("")
-    lines.append("fusionAIx is a specialized low-code and AI-driven digital transformation partner focused on modernizing enterprise workflows, improving customer/employee experiences, and accelerating delivery through platform-led automation.")
+    lines.append("At fusionAIx, we believe that the future of digital transformation lies in the seamless blend of low-code platforms and artificial intelligence. Our core team brings together decades of implementation experience, domain expertise, and a passion for innovation. We partner with enterprises to reimagine processes, accelerate application delivery, and unlock new levels of efficiency. We help businesses scale smarter, faster, and with greater impact.")
+    lines.append("")
+    lines.append("With a collaborative spirit and a commitment to excellence, our team transforms complex challenges into intelligent, practical solutions. fusionAIx is not just about technology—it's about empowering people, industries, and enterprises to thrive in a digital-first world.")
+    lines.append("")
+    lines.append("We are proud to be officially recognized as a Great Place To Work® Certified Company for 2025–26, reflecting our commitment to a culture built on trust, innovation, and people-first values.")
+    lines.append("")
+    lines.append("fusionAIx delivers tailored solutions that blend AI and automation to drive measurable results across industries. We are a niche Pega partner with 20+ successful Pega Constellation implementations across the globe. As Constellation migration experts, we focus on pattern-based development with Constellation, enabling faster project go-lives than traditional implementation approaches.")
+    lines.append("")
+    lines.append("Our proven capabilities span three core technology platforms: Pega Constellation, Microsoft Power Platform, and ServiceNow. Through these platforms, we provide comprehensive services including Low Code/No Code development, Digital Process Transformation, and AI & Data solutions.")
+    lines.append("")
+    lines.append("To accelerate time-to-value, fusionAIx offers proprietary accelerators and solution components including fxAgentSDK, fxAIStudio, fxMockUpToView, and fxSmartDCO. These tools enable rapid development, intelligent automation, and streamlined project delivery.")
+    lines.append("")
+    lines.append("We support clients across diverse industries including Insurance, Banking & Finance, Government & Public Sector, Automotive & Fleet Management, and Travel & Tourism, combining platform expertise with structured knowledge transfer to help customers build sustainable, future-ready capabilities.")
     lines.append("")
     lines.append("---")
     lines.append("")
     
-    # Solution Requirement Responses
     lines.append("## Solution Requirement Responses")
     lines.append("")
     
@@ -82,13 +71,11 @@ def generate_rfp_markdown(
         lines.append("")
         lines.append("**Response:**")
         lines.append("")
-        # Format response text (preserve line breaks)
         response_text = resp_data.get('response', '')
         for line in response_text.split('\n'):
             lines.append(line)
         lines.append("")
         
-        # Quality indicator if available
         if resp_data.get('quality'):
             quality = resp_data['quality']
             lines.append("**Quality Assessment:**")

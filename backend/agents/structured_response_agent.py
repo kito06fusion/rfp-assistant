@@ -107,36 +107,28 @@ def run_structured_response_agent(
             logger.warning("Failed to retrieve chunks from RAG: %s", str(e))
             retrieved_chunks = []
     
-    # Reduce RAG chunks to avoid excessive tokens
     chunks_text = format_retrieved_chunks(retrieved_chunks, max_chunks=5, max_total_chars=3000)
     
     fusionaix_context = ""
     if knowledge_base is not None:
         try:
-            # Limit KB context to reduce tokens - use shorter summaries
             req_text = " ".join([
-                req.source_text[:100]  # Limit to 100 chars per requirement
-                for req in requirements_result.solution_requirements[:5]  # Limit to 5 requirements
+                req.source_text[:100]
+                for req in requirements_result.solution_requirements[:5]
             ])
             fusionaix_context = knowledge_base.format_for_prompt(req_text)
-            # Limit to 2000 chars to reduce token usage
             if len(fusionaix_context) > 2000:
                 fusionaix_context = fusionaix_context[:2000] + "..."
             logger.info("Included fusionAIx knowledge base context (%d chars, from %d requirements)", len(fusionaix_context), min(8, len(requirements_result.solution_requirements)))
         except Exception as kb_exc:
             logger.warning("Failed to format knowledge base context: %s", kb_exc)
             fusionaix_context = ""
-    
-    # Limit solution requirements text to avoid excessive tokens
-    # Use summaries instead of full text for all requirements
     solution_reqs_parts = []
     for req in requirements_result.solution_requirements:
-        # Limit to first 150 chars per requirement to reduce token usage
         req_summary = req.source_text[:150] + ("..." if len(req.source_text) > 150 else "")
         solution_reqs_parts.append(f"- [{req.type.upper()}] {req_summary}")
     solution_reqs_text = "\n".join(solution_reqs_parts)
     
-    # Limit structure description to avoid excessive tokens
     structure_desc = structure_detection.structure_description
     if len(structure_desc) > 500:
         structure_desc = structure_desc[:500] + "..."

@@ -115,7 +115,6 @@ def run_response_agent(
 
     if max_tokens is None:
         estimated_input_tokens = total_input_tokens
-        # Increased max_tokens to allow for detailed responses (800-1500 words = 5000-10000 chars)
         max_tokens = min(2500, 32769 - estimated_input_tokens - 1000)
         logger.info(
             "Response max_tokens set to %d (target: ~5000-10000 characters, ~800-1500 words)",
@@ -139,7 +138,7 @@ def run_response_agent(
         max_tokens=max_tokens,
     )
     
-    MAX_RESPONSE_LENGTH = 10000  # Increased to allow detailed responses
+    MAX_RESPONSE_LENGTH = 10000
     if len(response_text) > MAX_RESPONSE_LENGTH:
         logger.warning(
             "Response too long (%d chars), truncating to %d chars",
@@ -150,7 +149,7 @@ def run_response_agent(
         last_period = truncated.rfind('.')
         last_newline = truncated.rfind('\n')
         cut_point = max(last_period, last_newline)
-        if cut_point > MAX_RESPONSE_LENGTH * 0.8:  # Only if we find a good break point
+        if cut_point > MAX_RESPONSE_LENGTH * 0.8:
             response_text = truncated[:cut_point + 1] + "\n\n[Response truncated for length]"
         else:
             response_text = truncated + "\n\n[Response truncated for length]"
