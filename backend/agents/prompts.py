@@ -5,10 +5,9 @@ EXTRACTION_SYSTEM_PROMPT = """Extract RFP info. Output JSON:
 - translated_text: English text
 - cpv_codes: array (only if explicitly written)
 - other_codes: array (only if written, format "TYPE: VALUE")
-- key_requirements_summary: 10-15 bullet points
+- key_requirements_summary: 3-7 bullet points
 
 Rules: Extract only what's written. No inventing codes/dates. No metadata."""
-
 
 REQUIREMENTS_SYSTEM_PROMPT = """Extract and categorize RFP requirements.
 
@@ -31,39 +30,10 @@ EXAMPLES:
 - GOOD: One requirement = "The system must support integration with existing systems such as document management, email, identity management, and core line-of-business systems."
 - BAD: Four separate requirements (one per system type)
 
-For each requirement: id, type (mandatory/optional/unspecified), source_text (FULL original text verbatim), normalized_text, category.
+For each requirement: id, type (mandatory/optional/unspecified), source_text (FULL original text verbatim), category.
+Note: source_text should be the complete, verbatim requirement text from the RFP. Do not create a normalized or rewritten version - use the original text exactly as it appears.
 
 Output JSON: solution_requirements, response_structure_requirements, notes."""
-
-
-SCOPE_SYSTEM_PROMPT = """Extract necessary RFP text (80-95% of original).
-
-Keep: requirements, scope, objectives, evaluation criteria, structure requirements.
-Remove: emails, addresses, phone numbers, contact names, signatures, metadata, headers/footers, legal boilerplate, placeholder dates like [DD Month YYYY].
-
-IMPORTANT EXCEPTION:
-- DO NOT remove any clauses describing the rights or remedies of the Ministry/Buyer/Authority (e.g. "Rights of the Ministry", "Rights of the Buyer", termination rights, penalties, audit rights, inspection rights). These are part of the commercial terms and MUST be kept in the necessary_text.
-
-CRITICAL: The removed_text field MUST contain the ACTUAL removed text content (not just a description). List each removed section verbatim, separated by '---REMOVED SECTION---'.
-
-Output JSON: necessary_text (complete text with removed parts excluded), removed_text (actual removed content, verbatim), rationale (brief explanation)."""
-
-
-COMPARISON_SYSTEM_PROMPT = """You are a quality assurance agent comparing the original RFP text with the extracted/cleaned text.
-
-Your task is to:
-1. Verify that ONLY administrative items were removed (emails, addresses, phone numbers, contact names, signatures, metadata, headers/footers, legal boilerplate)
-2. Check that NO substantive content is missing (requirements, scope, objectives, evaluation criteria, technical specifications, proposal structure requirements)
-3. Identify any substantive content that appears in the original but is missing from the extracted text
-4. Verify that the removed_text contains only administrative items, not requirements or other substantive content
-
-Be thorough and specific. If you find missing substantive content, list it clearly. If everything looks good, explain what you verified.
-
-Output JSON with:
-- agreement (bool): true if only admin items removed and no substantive content missing, false otherwise
-- missing_items (list of strings): List of specific substantive content items that are in the original but missing from extracted text. Each item should be a clear description (e.g., "Requirement for 99.9% uptime SLA", "Evaluation criterion: technical approach (40 points)", "Section 3.2: Data retention requirements"). Empty list [] if nothing missing.
-- removed_items_analysis (list of strings, optional): List of substantive items found in removed_text that should NOT have been removed. Only include items that are clearly substantive (requirements, scope, objectives, etc.). Empty list [] if removed_text only contains admin items.
-- notes (string): Detailed explanation of your findings. Describe what you checked, what you found, and any concerns. Be specific - mention what types of content you verified (requirements, scope, objectives, etc.) and whether they are all present in the extracted text."""
 
 
 
@@ -184,3 +154,73 @@ For each question, provide:
 - priority: "high" (critical for answering the requirement), "medium", or "low"
 
 Output JSON with a list of questions."""
+
+
+PREPROCESS_SYSTEM_PROMPT = """You are a high-level RFP preprocessing agent.
+
+You receive the FULL raw RFP text (after OCR). Your job is to:
+
+1) NORMALIZE / CLEAN TEXT
+- Work on the full text as provided.
+- Remove obvious OCR artifacts, duplicated page headers/footers, page numbers, and control characters.
+- Preserve the logical order and structure of the content.
+
+2) SPLIT INTO:
+- cleaned_text: the text that MUST be used for all downstream requirement extraction
+- removed_text: administrative / out-of-scope content that is safe to remove
+
+KEEP in cleaned_text:
+- All requirement statements (functional, technical, security, commercial, etc.)
+- Scope, objectives, evaluation criteria
+- Proposal structure / response format requirements
+- Any clause describing obligations, rights, penalties, SLAs, governance, or commercial terms
+- Any content that could affect how the vendor must respond or be evaluated
+
+REMOVE into removed_text:
+- Email addresses, phone numbers, postal addresses, contact names/titles
+- Signature blocks
+- Page headers/footers, page numbers
+- Copyright / legal notices that are not specific obligations (generic boilerplate)
+- Document metadata, cover page noise, table of contents, change logs
+- Placeholder dates like [DD Month YYYY]
+
+CRITICAL EXCEPTION:
+- Do NOT remove any clauses describing the rights or remedies of the Ministry/Buyer/Authority,
+  termination rights, penalties, audit/inspection rights, or similar. These MUST remain in cleaned_text.
+
+IMPORTANT FOR removed_text:
+- removed_text MUST contain the ACTUAL removed text content (not summaries).
+- If there are multiple removed sections, separate them with the string: ---REMOVED SECTION---
+
+3) LIGHT METADATA EXTRACTION
+- language: ISO code (e.g., "en", "fr") inferred from the main body of the RFP
+- key_requirements_summary: VERY SHORT global summary of key requirements
+  - 3–7 bullet points maximum
+  - Each bullet should be short and high-level (no full requirement text)
+
+4) SELF-CHECK / COMPARISON
+- Compare cleaned_text vs the original text.
+- Verify that:
+  - Only administrative items were moved to removed_text
+  - No substantive requirements/scope/evaluation/proposal-structure content was accidentally removed
+- If you are confident everything important is still present in cleaned_text and only admin items were removed:
+  - comparison_agreement = true
+  - comparison_notes: briefly explain what you checked and that it looks correct
+- If you see likely missing substantive content or substantive text inside removed_text:
+  - comparison_agreement = false
+  - comparison_notes: describe the problem in natural language so a human can review
+
+OUTPUT FORMAT (JSON ONLY, no explanations outside JSON):
+{
+  "language": "en",
+  "cleaned_text": "...",
+  "removed_text": "...",
+  "key_requirements_summary": "bullet 1\\nbullet 2\\n...",
+  "comparison_agreement": true,
+  "comparison_notes": "..."
+}
+
+Rules:
+- cleaned_text + removed_text together should cover the original text content (minus obvious OCR noise).
+- If you are unsure whether something is substantive, KEEP it in cleaned_text."""
+

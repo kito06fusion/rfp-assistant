@@ -37,27 +37,6 @@ export async function runRequirements(essentialText) {
   return await response.json();
 }
 
-export async function updateScope(necessaryText, removedText = "", rationale = "") {
-  const response = await fetch(`${API_BASE}/update-scope`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      necessary_text: necessaryText,
-      removed_text: removedText,
-      rationale,
-    }),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Update scope error ${response.status}: ${text.slice(0, 200)}`);
-  }
-
-  return await response.json();
-}
-
 export async function updateRequirements(requirements) {
   const response = await fetch(`${API_BASE}/update-requirements`, {
     method: "POST",
@@ -75,14 +54,14 @@ export async function updateRequirements(requirements) {
   return await response.json();
 }
 
-export async function buildQuery(extraction, requirements) {
+export async function buildQuery(preprocess, requirements) {
   const response = await fetch(`${API_BASE}/build-query`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      extraction,
+      preprocess,
       requirements,
     }),
   });
@@ -95,7 +74,7 @@ export async function buildQuery(extraction, requirements) {
   return await response.json();
 }
 
-export async function generateResponse(extraction, requirements, options = {}) {
+export async function generateResponse(preprocess, requirements, options = {}) {
   const { use_rag = true, num_retrieval_chunks = 5, session_id = null } = options;
 
   const response = await fetch(`${API_BASE}/generate-response`, {
@@ -104,7 +83,7 @@ export async function generateResponse(extraction, requirements, options = {}) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      extraction,
+      preprocess,
       requirements,
       use_rag,
       num_retrieval_chunks,
@@ -212,7 +191,7 @@ export async function getSession(sessionId) {
   return await response.json();
 }
 
-export async function previewResponses(extraction, requirements, options = {}) {
+export async function previewResponses(preprocess, requirements, options = {}) {
   const { use_rag = true, num_retrieval_chunks = 5, session_id = null } = options;
 
   const response = await fetch(`${API_BASE}/preview-responses`, {
@@ -221,7 +200,7 @@ export async function previewResponses(extraction, requirements, options = {}) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      extraction,
+      preprocess,
       requirements,
       use_rag,
       num_retrieval_chunks,
@@ -258,7 +237,7 @@ export async function updateResponse(previewId, requirementId, responseText) {
   return await response.json();
 }
 
-export async function generatePDFFromPreview(previewId, extraction, requirements, format = 'pdf') {
+export async function generatePDFFromPreview(previewId, preprocess, requirements, format = 'pdf') {
   const response = await fetch(`${API_BASE}/generate-pdf-from-preview`, {
     method: "POST",
     headers: {
@@ -266,7 +245,7 @@ export async function generatePDFFromPreview(previewId, extraction, requirements
     },
     body: JSON.stringify({
       preview_id: previewId,
-      extraction,
+      preprocess,
       requirements,
       format,
     }),

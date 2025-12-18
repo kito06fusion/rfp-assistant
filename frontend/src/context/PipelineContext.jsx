@@ -13,8 +13,7 @@ export function usePipeline() {
 export function PipelineProvider({ children }) {
   const [pipelineData, setPipelineData] = useState({
     ocr: null,
-    extraction: null,
-    scope: null,
+    preprocess: null,
     requirements: null,
     buildQuery: null,
     response: null,
@@ -22,19 +21,18 @@ export function PipelineProvider({ children }) {
 
   const [activeTab, setActiveTab] = useState('ocr')
   const [statuses, setStatuses] = useState({
-    extraction: 'waiting',
-    scope: 'waiting',
+    preprocess: 'waiting',
     requirements: 'waiting',
     buildQuery: 'waiting',
     response: 'waiting',
   })
 
   const [confirmations, setConfirmations] = useState({
-    scopeAccepted: false,
+    preprocessConfirmed: false,
     buildQueryConfirmed: false,
   })
   const [editable, setEditable] = useState({
-    scope: false,
+    preprocess: false,
     requirements: false,
     buildQuery: false,
   })
@@ -60,25 +58,23 @@ export function PipelineProvider({ children }) {
   const resetPipeline = useCallback(() => {
     setPipelineData({
       ocr: null,
-      extraction: null,
-      scope: null,
+      preprocess: null,
       requirements: null,
       buildQuery: null,
       response: null,
     })
     setStatuses({
-      extraction: 'waiting',
-      scope: 'waiting',
+      preprocess: 'waiting',
       requirements: 'waiting',
       buildQuery: 'waiting',
       response: 'waiting',
     })
     setConfirmations({
-      scopeAccepted: false,
+      preprocessConfirmed: false,
       buildQueryConfirmed: false,
     })
     setEditable({
-      scope: false,
+      preprocess: false,
       requirements: false,
       buildQuery: false,
     })

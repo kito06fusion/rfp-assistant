@@ -5,17 +5,16 @@ import './AgentTabs.css'
 
 const TABS = [
   { id: 'ocr', label: '1. OCR (Qwen)' },
-  { id: 'extraction', label: '2. Extraction agent' },
-  { id: 'scope', label: '3. Scope' },
-  { id: 'requirements', label: '4. Requirements' },
-  { id: 'build-query', label: '5. Build Query' },
-  { id: 'response', label: '6. Response' },
+  { id: 'preprocess', label: '2. Preprocess agent' },
+  { id: 'requirements', label: '3. Requirements' },
+  { id: 'build-query', label: '4. Build Query' },
+  { id: 'response', label: '5. Response' },
 ]
 
 export default function AgentTabs() {
   const { activeTab, setActiveTab, pipelineData } = usePipeline()
 
-  const hasData = pipelineData.extraction !== null
+  const hasData = pipelineData.preprocess !== null
 
   if (!hasData) {
     return null

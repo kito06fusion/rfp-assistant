@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import time
@@ -27,17 +28,59 @@ CHUNK_OVERLAP = 200
 
 class RAGSystem:
 
-    def __init__(self, docs_folder: str = "docs", index_path: Optional[str] = None):
+    def __init__(self, docs_folder: str = "docs", index_path: Optional[str] = None, query_cache_path: Optional[str] = None):
         self.docs_folder = Path(docs_folder)
         self.index_path = Path(index_path) if index_path else None
+        self.query_cache_path = Path(query_cache_path) if query_cache_path else None
         self.index: Optional[faiss.Index] = None
         self.metadata: List[Dict[str, Any]] = []
         self.client = None
+        self._query_embedding_cache: Dict[str, np.ndarray] = {}
+        self._load_query_cache()
         logger.info(
-            "RAGSystem initialized (docs_folder=%s, index_path=%s)",
+            "RAGSystem initialized (docs_folder=%s, index_path=%s, query_cache_size=%d)",
             self.docs_folder,
             self.index_path,
+            len(self._query_embedding_cache),
         )
+
+    def _get_query_hash(self, query: str) -> str:
+        """Generate a hash for the query text to use as cache key."""
+        return hashlib.sha256(query.encode('utf-8')).hexdigest()
+
+    def _load_query_cache(self) -> None:
+        """Load query embedding cache from disk if available."""
+        if self.query_cache_path and self.query_cache_path.exists():
+            try:
+                with open(self.query_cache_path, "rb") as f:
+                    cache_data = pickle.load(f)
+                    self._query_embedding_cache = {
+                        k: np.array(v, dtype=np.float32) 
+                        for k, v in cache_data.items()
+                    }
+                logger.info(
+                    "Loaded query embedding cache: %d entries from %s",
+                    len(self._query_embedding_cache),
+                    self.query_cache_path,
+                )
+            except Exception as e:
+                logger.warning("Failed to load query cache: %s", e)
+                self._query_embedding_cache = {}
+
+    def _save_query_cache(self) -> None:
+        """Save query embedding cache to disk."""
+        if self.query_cache_path:
+            try:
+                self.query_cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_data = {
+                    k: v.tolist() 
+                    for k, v in self._query_embedding_cache.items()
+                }
+                with open(self.query_cache_path, "wb") as f:
+                    pickle.dump(cache_data, f)
+                logger.debug("Saved query embedding cache: %d entries", len(self._query_embedding_cache))
+            except Exception as e:
+                logger.warning("Failed to save query cache: %s", e)
 
     def _get_embedding_client(self):
         if self.client is None:
@@ -67,13 +110,19 @@ class RAGSystem:
         avg_text_length = total_chars / len(texts) if texts else 0
         
         logger.info(
-            "Generating embeddings: %d texts, %d total chars, avg %d chars/text, model=%s, deployment=%s",
-            len(texts), total_chars, int(avg_text_length), EMBEDDING_MODEL, embedding_deployment
+            "Generating embeddings: %d texts, %d total chars, avg %d chars/text",
+            len(texts),
+            total_chars,
+            int(avg_text_length),
         )
 
         start_time = time.time()
         try:
-            logger.info("Requesting batch embeddings: %d texts, model=%s", len(texts), embedding_deployment)
+            logger.debug(
+                "Requesting batch embeddings: %d texts, model=%s",
+                len(texts),
+                embedding_deployment,
+            )
             response = client.embeddings.create(
                 model=embedding_deployment,
                 input=texts,
@@ -82,9 +131,10 @@ class RAGSystem:
             embeddings_array = np.array(embeddings, dtype=np.float32)
             elapsed = time.time() - start_time
             logger.info(
-                "Embedding generation complete (batch): %d embeddings, dimension=%d, elapsed=%.2fs, rate=%.2f embeddings/sec",
-                len(embeddings), embeddings_array.shape[1] if len(embeddings) > 0 else 0,
-                elapsed, len(texts) / elapsed if elapsed > 0 else 0
+                "Embedding generation complete (batch): %d embeddings, dimension=%d, elapsed=%.2fs",
+                len(embeddings),
+                embeddings_array.shape[1] if len(embeddings) > 0 else 0,
+                elapsed,
             )
             return embeddings_array
         except Exception:
@@ -108,9 +158,10 @@ class RAGSystem:
         elapsed = time.time() - start_time
         embeddings_array = np.array(embeddings, dtype=np.float32)
         logger.info(
-            "Embedding generation complete (fallback): %d embeddings, dimension=%d, elapsed=%.2fs, rate=%.2f embeddings/sec",
-            len(embeddings), embeddings_array.shape[1] if len(embeddings) > 0 else 0,
-            elapsed, len(texts) / elapsed if elapsed > 0 else 0
+            "Embedding generation complete (fallback): %d embeddings, dimension=%d, elapsed=%.2fs",
+            len(embeddings),
+            embeddings_array.shape[1] if len(embeddings) > 0 else 0,
+            elapsed,
         )
         return embeddings_array
 
@@ -324,18 +375,28 @@ class RAGSystem:
             raise ValueError("Metadata not loaded. Call build_index() or load_index() first.")
 
         query_length = len(query)
+        query_hash = self._get_query_hash(query)
         logger.info(
             "RAG search: query_length=%d chars, k=%d, index_size=%d vectors",
             query_length, k, self.index.ntotal
         )
         logger.debug("Query text (first 200 chars): %s", query[:200])
 
-        logger.debug("Generating query embedding...")
         embedding_start = time.time()
-        query_embedding = self._generate_embeddings([query])
-        query_vector = query_embedding.reshape(1, -1).astype(np.float32)
-        embedding_elapsed = time.time() - embedding_start
-        logger.debug("Query embedding generated in %.2fs, dimension=%d", embedding_elapsed, query_vector.shape[1])
+        if query_hash in self._query_embedding_cache:
+            logger.debug("Query embedding cache HIT (hash=%s)", query_hash[:16])
+            query_embedding = self._query_embedding_cache[query_hash]
+            query_vector = query_embedding.reshape(1, -1).astype(np.float32)
+            embedding_elapsed = time.time() - embedding_start
+            logger.debug("Query embedding loaded from cache in %.2fs, dimension=%d", embedding_elapsed, query_vector.shape[1])
+        else:
+            logger.debug("Query embedding cache MISS (hash=%s) - generating new embedding", query_hash[:16])
+            query_embedding = self._generate_embeddings([query])
+            query_vector = query_embedding.reshape(1, -1).astype(np.float32)
+            embedding_elapsed = time.time() - embedding_start
+            self._query_embedding_cache[query_hash] = query_embedding[0]
+            self._save_query_cache()
+            logger.debug("Query embedding generated in %.2fs, dimension=%d (cached for future use)", embedding_elapsed, query_vector.shape[1])
 
         logger.debug("Searching FAISS index...")
         search_start = time.time()

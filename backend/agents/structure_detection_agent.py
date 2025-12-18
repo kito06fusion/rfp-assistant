@@ -29,7 +29,7 @@ def _detect_structure_cached(response_structure_json: str) -> Dict[str, Any]:
         }
     
     structure_text = "\n\n".join([
-        f"[{req.type.upper()}] {req.normalized_text}\nSource: {req.source_text}"
+        f"[{req.type.upper()}] {req.source_text}"
         for req in response_structure_requirements
     ])
     

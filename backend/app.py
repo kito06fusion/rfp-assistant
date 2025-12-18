@@ -14,8 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend.pipeline.text_extraction import extract_text_from_file
-from backend.agents.extraction_agent import run_extraction_agent
-from backend.agents.scope_agent import run_scope_agent
+from backend.agents.preprocess_agent import run_preprocess_agent
 from backend.agents.requirements_agent import run_requirements_agent
 from backend.agents.build_query import build_query, build_query_for_single_requirement
 from backend.agents.response_agent import run_response_agent
@@ -24,6 +23,7 @@ from backend.agents.structured_response_agent import run_structured_response_age
 from backend.agents.question_agent import (
     analyze_requirements_for_questions,
     analyze_build_query_for_questions,
+    analyze_build_query_for_questions_legacy,
     infer_answered_questions_from_answer,
 )
 from backend.agents.quality_agent import assess_response_quality
@@ -32,11 +32,11 @@ from backend.models import (
     ExtractionResult,
     RequirementsResult,
     StructureDetectionResult,
-    ScopeResult,
     Question,
     Answer,
     ConversationContext,
     BuildQuery,
+    PreprocessResult,
 )
 from backend.knowledge_base import FusionAIxKnowledgeBase
 from backend.knowledge_base.company_kb import CompanyKnowledgeBase
@@ -49,7 +49,12 @@ def _setup_rag_and_kb(use_rag: bool) -> tuple[Optional[RAGSystem], FusionAIxKnow
             project_root = Path(__file__).parent.parent
             docs_folder = project_root / "docs"
             index_path = project_root / "rag_index"
-            rag_system = RAGSystem(docs_folder=str(docs_folder), index_path=str(index_path))
+            query_cache_path = project_root / "rag_query_cache.pkl"
+            rag_system = RAGSystem(
+                docs_folder=str(docs_folder), 
+                index_path=str(index_path),
+                query_cache_path=str(query_cache_path),
+            )
             try:
                 rag_system.load_index()
                 stats = rag_system.get_stats()
@@ -112,7 +117,7 @@ def _enrich_build_query_with_rag(
     )
 
     req_text_by_id: Dict[str, str] = {
-        req.id: req.normalized_text for req in requirements_result.solution_requirements
+        req.id: req.source_text for req in requirements_result.solution_requirements
     }
 
     base_text = build_query.query_text or ""
@@ -161,16 +166,16 @@ def validate_before_generation(
     for idx, req in enumerate(requirements_result.solution_requirements, 1):
         if not req.id or not req.id.strip():
             errors.append(f"Solution requirement {idx} missing ID")
-        if not req.normalized_text or not req.normalized_text.strip():
-            errors.append(f"Solution requirement {idx} ({req.id}) missing normalized_text")
+        if not req.source_text or not req.source_text.strip():
+            errors.append(f"Solution requirement {idx} ({req.id}) missing source_text")
         if not req.source_text or not req.source_text.strip():
             errors.append(f"Solution requirement {idx} ({req.id}) missing source_text")
         if not req.category or not req.category.strip():
             errors.append(f"Solution requirement {idx} ({req.id}) missing category")
         if req.type not in ["mandatory", "optional", "unspecified"]:
             errors.append(f"Solution requirement {idx} ({req.id}) has invalid type: {req.type}")
-        if len(req.normalized_text) < 10:
-            errors.append(f"Solution requirement {idx} ({req.id}) normalized_text too short (likely incomplete)")
+        if len(req.source_text) < 10:
+            errors.append(f"Solution requirement {idx} ({req.id}) source_text too short (likely incomplete)")
     
     if not requirements_result.response_structure_requirements:
         logger.warning("No response structure requirements found - responses may lack structure guidance")
@@ -178,8 +183,8 @@ def validate_before_generation(
         for idx, req in enumerate(requirements_result.response_structure_requirements, 1):
             if not req.id or not req.id.strip():
                 errors.append(f"Response structure requirement {idx} missing ID")
-            if not req.normalized_text or not req.normalized_text.strip():
-                errors.append(f"Response structure requirement {idx} ({req.id}) missing normalized_text")
+            if not req.source_text or not req.source_text.strip():
+                errors.append(f"Response structure requirement {idx} ({req.id}) missing source_text")
             if not req.source_text or not req.source_text.strip():
                 errors.append(f"Response structure requirement {idx} ({req.id}) missing source_text")
     
@@ -329,66 +334,38 @@ async def process_rfp(file: UploadFile = File(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail="No text could be extracted from file.")
 
     try:
-        extraction_res = run_extraction_agent(text)
+        preprocess_res = run_preprocess_agent(text)
     except Exception as exc:
         elapsed = time.time() - t0
         logger.exception(
-            "REQUEST %s: extraction agent failed after %.2fs: %s",
+            "REQUEST %s: preprocess agent failed after %.2fs: %s",
             request_id,
             elapsed,
             exc,
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Extraction agent failed for request {request_id}. Check server logs.",
-        ) from exc
-
-    logger.info(
-        "REQUEST %s: extraction agent finished (lang=%s, cpv=%d, other_codes=%d)",
-        request_id,
-        extraction_res.language,
-        len(extraction_res.cpv_codes),
-        len(extraction_res.other_codes),
-    )
-    try:
-        scope_res = run_scope_agent(translated_text=text)
-    except Exception as exc:
-        elapsed = time.time() - t0
-        logger.exception(
-            "REQUEST %s: scope agent failed after %.2fs: %s", request_id, elapsed, exc
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"Scope agent failed for request {request_id}. Check server logs.",
+            detail=f"Preprocess agent failed for request {request_id}. Check server logs.",
         ) from exc
     elapsed = time.time() - t0
     logger.info(
-        "REQUEST %s: scope agent finished (necessary_chars=%d, removed_chars=%d, cleaned_chars=%d, comparison_agreement=%s)",
+        "REQUEST %s: preprocess agent finished (cleaned_chars=%d, removed_chars=%d, comparison_agreement=%s)",
         request_id,
-        len(scope_res.necessary_text or ""),
-        len(scope_res.removed_text or ""),
-        len(scope_res.cleaned_text or ""),
-        scope_res.comparison_agreement,
+        len(preprocess_res.cleaned_text or ""),
+        len(preprocess_res.removed_text or ""),
+        preprocess_res.comparison_agreement,
     )
-    logger.info("REQUEST %s: extraction + scope completed in %.2fs", request_id, elapsed)
+    logger.info("REQUEST %s: OCR + preprocess completed in %.2fs", request_id, elapsed)
     response: Dict[str, Any] = {
-        "extraction": extraction_res.to_dict(),
-        "scope": scope_res.to_dict(),
+        "preprocess": preprocess_res.to_dict(),
         "requirements": None,
         "ocr_source_text": text,
     }
-    response["extraction"]["ocr_text"] = text
+    response["preprocess"]["ocr_text"] = text
     return response
 
 class RequirementsRequest(BaseModel):
     essential_text: str
-
-
-class UpdateScopeRequest(BaseModel):
-    """Manual edits to scoped text before confirmation."""
-    necessary_text: str
-    removed_text: str | None = None
-    rationale: str | None = None
 
 
 class UpdateRequirementsRequest(BaseModel):
@@ -401,7 +378,7 @@ async def run_requirements(req: RequirementsRequest) -> Dict[str, Any]:
         "Requirements endpoint called (essential_chars=%d)", len(req.essential_text)
     )
     try:
-        result = run_requirements_agent(essential_text=req.essential_text, structured_info={})
+        result = run_requirements_agent(essential_text=req.essential_text)
         
         logger.info("Running structure detection on %d response structure requirements", 
                    len(result.response_structure_requirements))
@@ -430,23 +407,6 @@ async def run_requirements(req: RequirementsRequest) -> Dict[str, Any]:
     return result.to_dict()
 
 
-@app.post("/update-scope")
-async def update_scope(req: UpdateScopeRequest) -> Dict[str, Any]:
-    logger.info(
-        "Update scope endpoint called (necessary_chars=%d)",
-        len(req.necessary_text),
-    )
-    scope = ScopeResult(
-        necessary_text=req.necessary_text,
-        removed_text=req.removed_text or "",
-        rationale=req.rationale or "Manually edited by user.",
-        cleaned_text=req.necessary_text,
-        comparison_agreement=True,
-        comparison_notes="Manually edited and accepted by user.",
-    )
-    return scope.to_dict()
-
-
 @app.post("/update-requirements")
 async def update_requirements(req: UpdateRequirementsRequest) -> Dict[str, Any]:
     logger.info("Update requirements endpoint called")
@@ -461,15 +421,25 @@ async def update_requirements(req: UpdateRequirementsRequest) -> Dict[str, Any]:
         ) from exc
 
 class BuildQueryRequest(BaseModel):
-    extraction: Dict[str, Any]
+    preprocess: Dict[str, Any]
     requirements: Dict[str, Any]
+
+
+def _extraction_from_preprocess(pre: PreprocessResult) -> ExtractionResult:
+    return ExtractionResult(
+        translated_text="",
+        language=pre.language,
+        key_requirements_summary=pre.key_requirements_summary,
+        raw_structured={},
+    )
 
 
 @app.post("/build-query")
 async def build_query_endpoint(req: BuildQueryRequest) -> Dict[str, Any]:
     logger.info("Build query endpoint called")
     try:
-        extraction_result = ExtractionResult(**req.extraction)
+        preprocess_result = PreprocessResult(**req.preprocess)
+        extraction_result = _extraction_from_preprocess(preprocess_result)
         requirements_result = RequirementsResult(**req.requirements)
         query = build_query(extraction_result, requirements_result)
         return query.model_dump()
@@ -482,7 +452,7 @@ async def build_query_endpoint(req: BuildQueryRequest) -> Dict[str, Any]:
 
 
 class GenerateResponseRequest(BaseModel):
-    extraction: Dict[str, Any]
+    preprocess: Dict[str, Any]
     requirements: Dict[str, Any]
     use_rag: bool = True
     num_retrieval_chunks: int = 5
@@ -493,9 +463,8 @@ class GenerateResponseRequest(BaseModel):
 async def generate_response_endpoint(req: GenerateResponseRequest) -> Dict[str, Any]:
     logger.info("Generate response endpoint called (use_rag=%s)", req.use_rag)
     try:
-        from backend.models import BuildQuery, ExtractionResult, RequirementsResult
-        
-        extraction_result = ExtractionResult(**req.extraction)
+        preprocess_result = PreprocessResult(**req.preprocess)
+        extraction_result = _extraction_from_preprocess(preprocess_result)
         requirements_result = RequirementsResult(**req.requirements)
         
         if not requirements_result.solution_requirements:
@@ -606,7 +575,6 @@ async def _generate_structured_response(
             logger.info("Including Q&A context from session %s (%d answers)", session_id, len(context.answers))
         
         result = run_structured_response_agent(
-            extraction_result=extraction_result,
             requirements_result=requirements_result,
             structure_detection=structure_detection,
             rag_system=rag_system,
@@ -783,11 +751,13 @@ async def _generate_per_requirement_response(
                 total_requirements,
                 solution_req.id,
             )
-            logger.info(
+            logger.debug(
                 "[%d/%d] Requirement text: %s",
                 idx,
                 total_requirements,
-                solution_req.normalized_text[:100] + "..." if len(solution_req.normalized_text) > 100 else solution_req.normalized_text,
+                solution_req.source_text[:100] + "..."
+                if len(solution_req.source_text) > 100
+                else solution_req.source_text,
             )
             
             build_query_obj = build_query_for_single_requirement(
@@ -803,14 +773,14 @@ async def _generate_per_requirement_response(
                     knowledge_base=knowledge_base,
                     qa_context=qa_context,
                 )
-                words = solution_req.normalized_text.split()
+                words = solution_req.source_text.split()
                 key_phrase = " ".join(words[:10]) + ("..." if len(words) > 10 else "")
                 
                 quality_assessment = assess_response_quality(solution_req, result.response_text)
                 
                 individual_responses.append({
                     "requirement_id": solution_req.id,
-                    "requirement_text": solution_req.normalized_text,
+                    "requirement_text": solution_req.source_text,
                     "key_phrase": key_phrase,
                     "response": result.response_text,
                     "notes": result.notes,
@@ -851,12 +821,12 @@ async def _generate_per_requirement_response(
                     total_requirements,
                     solution_req.id,
                 )
-                words = solution_req.normalized_text.split()
+                words = solution_req.source_text.split()
                 key_phrase = " ".join(words[:10]) + ("..." if len(words) > 10 else "")
 
                 individual_responses.append({
                     "requirement_id": solution_req.id,
-                    "requirement_text": solution_req.normalized_text,
+                    "requirement_text": solution_req.source_text,
                     "key_phrase": key_phrase,
                     "response": f"[ERROR: Failed to generate response for this requirement: {str(req_exc)}]",
                     "notes": f"Error: {str(req_exc)}",
@@ -915,8 +885,7 @@ async def _generate_per_requirement_response(
             combined_parts.append("RESPONSE STRUCTURE REQUIREMENTS")
             combined_parts.append("-" * 80)
             for resp_req in requirements_result.response_structure_requirements:
-                combined_parts.append(f"[{resp_req.type.upper()}] {resp_req.normalized_text}")
-                combined_parts.append(f"Source: {resp_req.source_text}")
+                combined_parts.append(f"[{resp_req.type.upper()}] {resp_req.source_text}")
                 combined_parts.append("")
             combined_parts.append("")
         
@@ -1080,8 +1049,7 @@ async def _generate_per_requirement_response(
         combined_parts.append("RESPONSE STRUCTURE REQUIREMENTS")
         combined_parts.append("-" * 80)
         for resp_req in requirements_result.response_structure_requirements:
-            combined_parts.append(f"[{resp_req.type.upper()}] {resp_req.normalized_text}")
-            combined_parts.append(f"Source: {resp_req.source_text}")
+            combined_parts.append(f"[{resp_req.type.upper()}] {resp_req.source_text}")
             combined_parts.append("")
         combined_parts.append("")
     
@@ -1156,13 +1124,6 @@ class EnrichBuildQueryRequest(BaseModel):
 async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str, Any]:
     logger.info("Generate questions endpoint called")
     try:
-        from backend.models import RequirementsResult, BuildQuery
-        from backend.agents.question_agent import (
-            analyze_build_query_for_questions, 
-            analyze_requirements_for_questions,
-            analyze_build_query_for_questions_legacy,
-        )
-        
         company_kb = get_company_kb()
         rag_system, _ = _setup_rag_and_kb(use_rag=True)
         
@@ -1397,8 +1358,6 @@ async def get_session(session_id: str) -> Dict[str, Any]:
 
 @app.post("/enrich-build-query")
 async def enrich_build_query_endpoint(req: EnrichBuildQueryRequest) -> Dict[str, Any]:
-    from backend.models import BuildQuery
-
     try:
         build_query = BuildQuery(**req.build_query)
     except Exception as exc:
@@ -1424,7 +1383,7 @@ _response_cache: Dict[str, List[Dict[str, Any]]] = {}
 
 
 class PreviewResponseRequest(BaseModel):
-    extraction: Dict[str, Any]
+    preprocess: Dict[str, Any]
     requirements: Dict[str, Any]
     use_rag: bool = True
     num_retrieval_chunks: int = 5
@@ -1435,9 +1394,10 @@ class PreviewResponseRequest(BaseModel):
 async def preview_responses_endpoint(req: PreviewResponseRequest) -> Dict[str, Any]:
     logger.info("Preview responses endpoint called")
     try:
-        from backend.models import ExtractionResult, RequirementsResult
+        from backend.models import RequirementsResult
         
-        extraction_result = ExtractionResult(**req.extraction)
+        preprocess_result = PreprocessResult(**req.preprocess)
+        extraction_result = _extraction_from_preprocess(preprocess_result)
         requirements_result = RequirementsResult(**req.requirements)
         
         if not requirements_result.solution_requirements:
@@ -1482,14 +1442,14 @@ async def preview_responses_endpoint(req: PreviewResponseRequest) -> Dict[str, A
                     qa_context=qa_context,
                 )
                 
-                words = solution_req.normalized_text.split()
+                words = solution_req.source_text.split()
                 key_phrase = " ".join(words[:10]) + ("..." if len(words) > 10 else "")
                 
                 quality_assessment = assess_response_quality(solution_req, result.response_text)
                 
                 individual_responses.append({
                     "requirement_id": solution_req.id,
-                    "requirement_text": solution_req.normalized_text,
+                    "requirement_text": solution_req.source_text,
                     "key_phrase": key_phrase,
                     "response": result.response_text,
                     "notes": result.notes,
@@ -1497,11 +1457,11 @@ async def preview_responses_endpoint(req: PreviewResponseRequest) -> Dict[str, A
                 })
             except Exception as req_exc:
                 logger.error("Failed to generate response for requirement %s: %s", solution_req.id, req_exc)
-                words = solution_req.normalized_text.split()
+                words = solution_req.source_text.split()
                 key_phrase = " ".join(words[:10]) + ("..." if len(words) > 10 else "")
                 individual_responses.append({
                     "requirement_id": solution_req.id,
-                    "requirement_text": solution_req.normalized_text,
+                    "requirement_text": solution_req.source_text,
                     "key_phrase": key_phrase,
                     "response": f"[ERROR: Failed to generate response: {str(req_exc)}]",
                     "notes": f"Error: {str(req_exc)}",
@@ -1557,7 +1517,7 @@ async def update_response_endpoint(req: UpdateResponseRequest) -> Dict[str, Any]
 
 class GeneratePDFFromPreviewRequest(BaseModel):
     preview_id: str
-    extraction: Dict[str, Any]
+    preprocess: Dict[str, Any]
     requirements: Dict[str, Any]
     format: str = "pdf" 
 
@@ -1569,7 +1529,8 @@ async def generate_pdf_from_preview_endpoint(req: GeneratePDFFromPreviewRequest)
     
     individual_responses = _response_cache[req.preview_id]
     
-    extraction_result = ExtractionResult(**req.extraction)
+    preprocess_result = PreprocessResult(**req.preprocess)
+    extraction_result = _extraction_from_preprocess(preprocess_result)
     requirements_result = RequirementsResult(**req.requirements)
     
     rfp_title = f"RFP Response"
@@ -1579,6 +1540,12 @@ async def generate_pdf_from_preview_endpoint(req: GeneratePDFFromPreviewRequest)
     project_root = Path(__file__).parent.parent
     timestamp = int(time.time())
     
+    logger.info(
+        "Generate PDF from preview called (format=%s, preview_id=%s)",
+        req.format,
+        req.preview_id,
+    )
+
     if req.format == "docx":
         from backend.document_formatter import generate_rfp_docx
         if not generate_rfp_docx:
@@ -1588,7 +1555,12 @@ async def generate_pdf_from_preview_endpoint(req: GeneratePDFFromPreviewRequest)
         output_dir.mkdir(parents=True, exist_ok=True)
         filename = f"rfp_response_{extraction_result.language}_{timestamp}.docx"
         output_path = output_dir / filename
-        
+        logger.info(
+            "Generating DOCX from preview %s into %s",
+            req.preview_id,
+            output_path,
+        )
+
         docx_bytes = generate_rfp_docx(
             individual_responses=individual_responses,
             requirements_result=requirements_result,
@@ -1613,7 +1585,12 @@ async def generate_pdf_from_preview_endpoint(req: GeneratePDFFromPreviewRequest)
         output_dir.mkdir(parents=True, exist_ok=True)
         filename = f"rfp_response_{extraction_result.language}_{timestamp}.md"
         output_path = output_dir / filename
-        
+        logger.info(
+            "Generating Markdown from preview %s into %s",
+            req.preview_id,
+            output_path,
+        )
+
         markdown_bytes = generate_rfp_markdown(
             individual_responses=individual_responses,
             requirements_result=requirements_result,
@@ -1638,7 +1615,12 @@ async def generate_pdf_from_preview_endpoint(req: GeneratePDFFromPreviewRequest)
         output_dir.mkdir(parents=True, exist_ok=True)
         filename = f"rfp_response_{extraction_result.language}_{timestamp}.pdf"
         pdf_path = output_dir / filename
-        
+        logger.info(
+            "Generating PDF from preview %s into %s",
+            req.preview_id,
+            pdf_path,
+        )
+
         pdf_bytes = generate_rfp_pdf(
             individual_responses=individual_responses,
             requirements_result=requirements_result,

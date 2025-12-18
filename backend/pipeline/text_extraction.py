@@ -33,7 +33,7 @@ def _pdf_to_images(pdf_path: Path) -> List[Image.Image]:
         )
 
     logger.info("[Vision OCR Fallback] Converting PDF to images: %s", pdf_path.name)
-    logger.info("[Vision OCR Fallback] Using DPI: 200 (for OCR quality)")
+    logger.debug("[Vision OCR Fallback] Using DPI: 200 (for OCR quality)")
     images = convert_from_path(str(pdf_path), dpi=200)
     logger.info("[Vision OCR Fallback] Converted PDF to %d page image(s)", len(images))
     return images
@@ -73,15 +73,21 @@ def _image_to_base64(image: Image.Image) -> str:
     return f"data:image/png;base64,{img_base64}"
 
 def _extract_text_from_images(images: List[Image.Image]) -> str:
-    logger.info("[Vision OCR] Starting OCR extraction from %d image(s) using model: %s", 
-               len(images), TEXT_EXTRACTION_MODEL)
+    logger.info(
+        "[Vision OCR] Starting OCR extraction from %d image(s) using model: %s",
+        len(images),
+        TEXT_EXTRACTION_MODEL,
+    )
     logger.info("[Vision OCR] This may take a while depending on document size...")
     all_text_parts: List[str] = []
     for idx, image in enumerate(images, 1):
-        logger.info("[Vision OCR] Processing page %d/%d...", idx, len(images))
+        logger.debug("[Vision OCR] Processing page %d/%d...", idx, len(images))
         img_base64 = _image_to_base64(image)
-        logger.debug("[Vision OCR] Page %d: encoded image to base64 (%d bytes)", 
-                    idx, len(img_base64))
+        logger.debug(
+            "[Vision OCR] Page %d: encoded image to base64 (%d bytes)",
+            idx,
+            len(img_base64),
+        )
 
         prompt = (
             "Extract ALL text from this document page. "
@@ -103,7 +109,11 @@ def _extract_text_from_images(images: List[Image.Image]) -> str:
             }
         ]
 
-        logger.info("[Vision OCR] Sending page %d/%d to vision model API...", idx, len(images))
+        logger.debug(
+            "[Vision OCR] Sending page %d/%d to vision model API...",
+            idx,
+            len(images),
+        )
         page_text = chat_completion_with_vision(
             model=TEXT_EXTRACTION_MODEL,
             messages=messages,
@@ -112,10 +122,18 @@ def _extract_text_from_images(images: List[Image.Image]) -> str:
         )
 
         all_text_parts.append(page_text)
-        logger.info("[Vision OCR] Page %d/%d: extracted %d characters", idx, len(images), len(page_text))
+        logger.debug(
+            "[Vision OCR] Page %d/%d: extracted %d characters",
+            idx,
+            len(images),
+            len(page_text),
+        )
     full_text = "\n\n--- Page Break ---\n\n".join(all_text_parts)
-    logger.info("[Vision OCR] OCR extraction completed: %d total characters from %d page(s)", 
-               len(full_text), len(images))
+    logger.info(
+        "[Vision OCR] OCR extraction completed: %d total characters from %d page(s)",
+        len(full_text),
+        len(images),
+    )
     return full_text
 
 def _extract_text_from_pdf_direct(pdf_path: Path) -> str:
