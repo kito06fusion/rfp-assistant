@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional
 
 from backend.llm.client import chat_completion
 from backend.models import (
-    ExtractionResult,
     RequirementsResult,
     StructureDetectionResult,
     ResponseResult,
@@ -23,11 +22,6 @@ def format_retrieved_chunks(
     max_chunks: int = 4,
     max_total_chars: int = 3000,
 ) -> str:
-    """
-    Format RAG chunks for inclusion in the structured-response prompt while:
-    - de-duplicating similar evidence chunks
-    - enforcing a total character budget to keep token usage reasonable
-    """
     if not chunks:
         return ""
 
@@ -63,7 +57,6 @@ def format_retrieved_chunks(
 
 
 def run_structured_response_agent(
-    extraction_result: ExtractionResult,
     requirements_result: RequirementsResult,
     structure_detection: StructureDetectionResult,
     rag_system: Optional[RAGSystem] = None,
@@ -99,7 +92,7 @@ def run_structured_response_agent(
                 if len(all_chunks) >= num_retrieval_chunks * 2:  # Limit total chunks
                     break
                 try:
-                    req_chunks = rag_system.search(req.normalized_text, k=min(2, num_retrieval_chunks))
+                    req_chunks = rag_system.search(req.source_text, k=min(2, num_retrieval_chunks))
                     for chunk in req_chunks:
                         chunk_id = chunk.get("chunk_id") or str(chunk.get("chunk_text", ""))[:50]
                         if chunk_id not in seen_chunk_ids:
@@ -114,32 +107,43 @@ def run_structured_response_agent(
             logger.warning("Failed to retrieve chunks from RAG: %s", str(e))
             retrieved_chunks = []
     
-    chunks_text = format_retrieved_chunks(retrieved_chunks, max_chunks=8, max_total_chars=5000)
+    # Reduce RAG chunks to avoid excessive tokens
+    chunks_text = format_retrieved_chunks(retrieved_chunks, max_chunks=5, max_total_chars=3000)
     
     fusionaix_context = ""
     if knowledge_base is not None:
         try:
+            # Limit KB context to reduce tokens - use shorter summaries
             req_text = " ".join([
-                req.normalized_text[:200]  # Increased from 100 to 200 chars per requirement
-                for req in requirements_result.solution_requirements[:8]  # Increased from 3 to 8 requirements
+                req.source_text[:100]  # Limit to 100 chars per requirement
+                for req in requirements_result.solution_requirements[:5]  # Limit to 5 requirements
             ])
             fusionaix_context = knowledge_base.format_for_prompt(req_text)
-            # Increased limit from 1000 to 3000 chars for more comprehensive context
-            if len(fusionaix_context) > 3000:
-                fusionaix_context = fusionaix_context[:3000] + "..."
+            # Limit to 2000 chars to reduce token usage
+            if len(fusionaix_context) > 2000:
+                fusionaix_context = fusionaix_context[:2000] + "..."
             logger.info("Included fusionAIx knowledge base context (%d chars, from %d requirements)", len(fusionaix_context), min(8, len(requirements_result.solution_requirements)))
         except Exception as kb_exc:
             logger.warning("Failed to format knowledge base context: %s", kb_exc)
             fusionaix_context = ""
     
-    solution_reqs_text = "\n".join([
-        f"- [{req.type.upper()}] {req.normalized_text}"
-        for req in requirements_result.solution_requirements
-    ])
+    # Limit solution requirements text to avoid excessive tokens
+    # Use summaries instead of full text for all requirements
+    solution_reqs_parts = []
+    for req in requirements_result.solution_requirements:
+        # Limit to first 150 chars per requirement to reduce token usage
+        req_summary = req.source_text[:150] + ("..." if len(req.source_text) > 150 else "")
+        solution_reqs_parts.append(f"- [{req.type.upper()}] {req_summary}")
+    solution_reqs_text = "\n".join(solution_reqs_parts)
+    
+    # Limit structure description to avoid excessive tokens
+    structure_desc = structure_detection.structure_description
+    if len(structure_desc) > 500:
+        structure_desc = structure_desc[:500] + "..."
     
     user_prompt_parts = [
         "RFP RESPONSE STRUCTURE REQUIREMENTS:",
-        structure_detection.structure_description,
+        structure_desc,
         "",
         f"REQUIRED SECTIONS (in order):",
     ]
@@ -161,18 +165,33 @@ def run_structured_response_agent(
             "",
         ])
     
+    # Add RAG chunks (if available)
+    # NOTE: RAG chunks may contain similar information to Q&A answers, but RAG is from prior documents
+    # while Q&A is user-provided for this specific RFP. Both are included but Q&A takes precedence.
     if chunks_text:
         user_prompt_parts.extend([
             chunks_text,
             "",
         ])
     
+    # Add Q&A context (user-provided answers take precedence over RAG)
+    # NOTE: Q&A answers may overlap with RAG chunks, but Q&A is more specific and current.
+    # The model should prioritize Q&A information when there's overlap.
     if qa_context:
+        # Limit Q&A context length to avoid excessive tokens
+        # Q&A is critical user input, but we can still be reasonable about length
+        qa_context_limited = qa_context
+        if len(qa_context) > 4000:  # Limit to ~1000 tokens
+            # Keep first part and indicate truncation
+            qa_context_limited = qa_context[:4000] + "\n\n[Q&A context truncated for length - use provided information fully]"
+        
         user_prompt_parts.extend([
             "=" * 80,
             "USER-PROVIDED INFORMATION (CRITICAL - MUST USE FULL DETAILS):",
             "=" * 80,
-            qa_context,
+            "NOTE: The information below was provided by the user in response to questions. This takes precedence over RAG examples above.",
+            "",
+            qa_context_limited,
             "",
             "CRITICAL INSTRUCTIONS FOR USING Q&A INFORMATION:",
             "- The Q&A above contains SPECIFIC, DETAILED information that the user provided about their solution.",
@@ -209,6 +228,20 @@ def run_structured_response_agent(
     system_tokens = len(STRUCTURED_RESPONSE_SYSTEM_PROMPT) // 4
     user_tokens = len(user_prompt) // 4
     total_input_tokens = system_tokens + user_tokens + 100
+    
+    # Log token breakdown at debug level to avoid noisy logs in production
+    logger.debug(
+        "Token breakdown - system: %d, user: %d, total: %d | "
+        "Structure desc: %d chars, Solution reqs: %d chars, KB: %d chars, RAG: %d chars, Q&A: %d chars",
+        system_tokens,
+        user_tokens,
+        total_input_tokens,
+        len(structure_desc),
+        len(solution_reqs_text),
+        len(fusionaix_context),
+        len(chunks_text),
+        len(qa_context) if qa_context else 0,
+    )
     
     if max_tokens is None:
         num_sections = len(structure_detection.detected_sections)

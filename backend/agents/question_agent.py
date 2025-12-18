@@ -25,7 +25,7 @@ def _build_rag_context_for_requirement(
         return ""
 
     try:
-        search_query = f"{requirement.normalized_text}\n{requirement.source_text}"
+        search_query = requirement.source_text
         logger.info(
             "Question agent: running RAG search for requirement %s (k=%d, query_len=%d)",
             requirement.id,
@@ -112,7 +112,7 @@ def generate_questions(
     
     # Build context from all requirements
     all_req_text = "\n\n".join([
-        f"[{req.id}] {req.normalized_text}"
+        f"[{req.id}] {req.source_text}"
         for req in all_requirements[:10]  # Limit to first 10 for context
     ])
     
@@ -125,9 +125,7 @@ RAG CONTEXT (PRIOR RFP ANSWERS - TREAT THESE AS KNOWN INFORMATION):
 {rag_context or "[No RAG context available for this requirement]"}
 
 REQUIREMENT TO ANALYZE:
-[{requirement.id}] {requirement.normalized_text}
-
-Source Text: {requirement.source_text}
+[{requirement.id}] {requirement.source_text}
 
 CONTEXT FROM OTHER REQUIREMENTS:
 {all_req_text}
@@ -277,7 +275,7 @@ def analyze_build_query_for_questions(
         
         # Build context from other requirements
         other_reqs_text = "\n".join([
-            f"[{r.id}] {r.normalized_text}"
+            f"[{r.id}] {r.source_text}"
             for r in requirements_result.solution_requirements
             if r.id != req.id
         ])
@@ -293,8 +291,7 @@ REQUIREMENT TO ANALYZE:
 ID: {req.id}
 Type: {req.type}
 Category: {req.category}
-Requirement Text: {req.normalized_text}
-Original Source: {req.source_text}
+Requirement Text: {req.source_text}
 
 CONTEXT - OTHER REQUIREMENTS (for reference):
 {other_reqs_text[:1000] if len(other_reqs_text) > 1000 else other_reqs_text}
@@ -304,9 +301,6 @@ RESPONSE STRUCTURE REQUIREMENTS (how to format the response):
 
 KNOWN COMPANY INFORMATION (DO NOT ask about these):
 {known_info_text}
-
-RAG CONTEXT (PRIOR RFP ANSWERS / KNOWLEDGE ALREADY AVAILABLE):
-{rag_context or "[No RAG context available for this requirement]"}
 
 RAG CONTEXT (PRIOR RFP ANSWERS / KNOWLEDGE ALREADY AVAILABLE):
 {rag_context or "[No RAG context available for this requirement]"}

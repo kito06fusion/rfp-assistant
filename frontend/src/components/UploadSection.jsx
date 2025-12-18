@@ -26,23 +26,21 @@ export default function UploadSection() {
     setStatus('Uploading and running agents… this may take a moment.')
 
     try {
-      updateStatus('extraction', 'processing')
+      updateStatus('preprocess', 'processing')
       const data = await processRFP(file)
 
       // Update pipeline data
       updatePipelineData('ocr', data.ocr_source_text || 'No OCR text returned.')
-      updatePipelineData('extraction', data.extraction)
-      updatePipelineData('scope', data.scope)
+      updatePipelineData('preprocess', data.preprocess)
 
-      updateStatus('extraction', 'complete')
-      updateStatus('scope', 'complete')
+      updateStatus('preprocess', 'complete')
       updateStatus('requirements', 'waiting')
 
-      setStatus('Extraction and scope finished. Review, then accept scope to run requirements.')
+      setStatus('Preprocess step finished. You can now run the requirements agent.')
     } catch (err) {
       console.error(err)
       setStatus(`Failed to process file: ${err.message}`)
-      updateStatus('extraction', 'error')
+      updateStatus('preprocess', 'error')
     } finally {
       setIsProcessing(false)
     }

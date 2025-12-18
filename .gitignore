@@ -39,6 +39,8 @@ dist/
 output/pdfs/*.pdf
 !output/pdfs/.gitkeep
 rag_index/
+rag_index.*
+rag_query_cache.pkl
 
 # Temporary
 *.tmp

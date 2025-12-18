@@ -277,8 +277,6 @@ def generate_rfp_pdf(
     
     if not rfp_title:
         rfp_title = f"RFP Response - {extraction_result.language.upper()}"
-        if extraction_result.cpv_codes:
-            rfp_title += f" (CPV: {', '.join(extraction_result.cpv_codes[:2])})"
     
     company_info_with_logo = COMPANY_INFO.copy()
     company_info_with_logo["logo_path"] = logo_path_str

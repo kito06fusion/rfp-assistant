@@ -25,9 +25,7 @@ def _assess_response_quality_cached(
     user_prompt = f"""Evaluate the quality of this RFP response:
 
 REQUIREMENT:
-{requirement.normalized_text}
-
-Source: {requirement.source_text}
+{requirement.source_text}
 
 RESPONSE:
 {response_text}

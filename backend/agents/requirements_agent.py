@@ -15,14 +15,12 @@ logger = logging.getLogger(__name__)
 REQUIREMENTS_MODEL = "gpt-5-chat"
 
 @functools.lru_cache(maxsize=512)
-def _run_requirements_agent_cached(essential_text: str, structured_info_json: str) -> RequirementsResult:
-    structured_info = json.loads(structured_info_json) if structured_info_json else {}
+def _run_requirements_agent_cached(essential_text: str) -> RequirementsResult:
     text_input = essential_text[:30000] if len(essential_text) > 30000 else essential_text
     user_prompt = f"RFP:\n{text_input}\n\nExtract ALL requirements. Group related requirements together - do NOT split into individual sentences. Sort into solution_requirements or response_structure_requirements. source_text must be COMPLETE original text verbatim (full paragraph/bullet point)."
     logger.info(
-        "Requirements agent: processing (essential_chars=%d, has_structured=%s)",
+        "Requirements agent: processing (essential_chars=%d)",
         len(essential_text),
-        bool(structured_info),
     )
     system_tokens = len(REQUIREMENTS_SYSTEM_PROMPT) // 4
     user_tokens = len(user_prompt) // 4
@@ -168,6 +166,8 @@ def _run_requirements_agent_cached(essential_text: str, structured_info_json: st
     logger.info("Requirements agent: Processing %d solution requirements", len(solution_raw))
     for idx, req_dict in enumerate(solution_raw):
         try:
+            # Remove normalized_text if present (legacy field, no longer used)
+            req_dict = {k: v for k, v in req_dict.items() if k != "normalized_text"}
             solution_reqs.append(RequirementItem(**req_dict))
         except Exception as e:
             logger.warning("Failed to parse solution requirement #%d: %s, error: %s", idx, req_dict, e)
@@ -177,6 +177,8 @@ def _run_requirements_agent_cached(essential_text: str, structured_info_json: st
     logger.info("Requirements agent: Processing %d response structure requirements", len(response_raw))
     for idx, req_dict in enumerate(response_raw):
         try:
+            # Remove normalized_text if present (legacy field, no longer used)
+            req_dict = {k: v for k, v in req_dict.items() if k != "normalized_text"}
             response_reqs.append(RequirementItem(**req_dict))
         except Exception as e:
             logger.warning("Failed to parse response structure requirement #%d: %s, error: %s", idx, req_dict, e)
@@ -195,20 +197,17 @@ def _run_requirements_agent_cached(essential_text: str, structured_info_json: st
 
 def run_requirements_agent(
     essential_text: str,
-    structured_info: Dict[str, Any],
 ) -> RequirementsResult:
-    structured_info_json = json.dumps(structured_info, sort_keys=True) if structured_info else "{}"
     cache_info = _run_requirements_agent_cached.cache_info()
     logger.info(
-        "Requirements agent: starting (essential_chars=%d, has_structured=%s, cache_hits=%d, cache_misses=%d, cache_size=%d/%d)",
+        "Requirements agent: starting (essential_chars=%d, cache_hits=%d, cache_misses=%d, cache_size=%d/%d)",
         len(essential_text),
-        bool(structured_info),
         cache_info.hits,
         cache_info.misses,
         cache_info.currsize,
         cache_info.maxsize,
     )
-    result = _run_requirements_agent_cached(essential_text, structured_info_json)
+    result = _run_requirements_agent_cached(essential_text)
     new_cache_info = _run_requirements_agent_cached.cache_info()
     if new_cache_info.hits > cache_info.hits:
         logger.info("Requirements agent: cache HIT - returned cached result")

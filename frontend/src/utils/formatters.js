@@ -1,98 +1,49 @@
 /**
- * Format extraction output for display
+ * Format preprocess output for display
+ * (combines light preprocess metadata + cleaning information)
  */
-export function formatExtractionOutput(extraction) {
-  if (!extraction) return "No extraction data available.";
+export function formatPreprocessOutput(preprocess) {
+  if (!preprocess) return "No preprocess data available.";
   
-  let output = "EXTRACTION RESULTS\n";
+  let output = "PREPROCESS RESULTS\n";
   output += "=".repeat(60) + "\n\n";
   
-  output += "Language: " + (extraction.language || "Unknown") + "\n\n";
+  // Language
+  output += "Language: " + (preprocess.language || "Unknown") + "\n\n";
   
-  if (extraction.cpv_codes && extraction.cpv_codes.length > 0) {
-    output += "CPV Codes (" + extraction.cpv_codes.length + "):\n";
-    extraction.cpv_codes.forEach((code, idx) => {
-      output += "   " + (idx + 1) + ". " + code + "\n";
-    });
-    output += "\n";
-  } else {
-    output += "CPV Codes: None found\n\n";
-  }
-  
-  if (extraction.other_codes && extraction.other_codes.length > 0) {
-    output += "Other Codes (" + extraction.other_codes.length + "):\n";
-    extraction.other_codes.forEach((code, idx) => {
-      output += "   " + (idx + 1) + ". " + code + "\n";
-    });
-    output += "\n";
-  } else {
-    output += "Other Codes: None found\n\n";
-  }
-  
-  if (extraction.key_requirements_summary) {
+  // Key requirements summary (global, not per-requirement)
+  if (preprocess.key_requirements_summary) {
     output += "Key Requirements Summary:\n";
     output += "-".repeat(60) + "\n";
-    output += extraction.key_requirements_summary + "\n\n";
+    output += preprocess.key_requirements_summary + "\n\n";
   }
   
-  if (extraction.raw_structured && Object.keys(extraction.raw_structured).length > 0) {
-    output += "Additional Metadata:\n";
-    output += "-".repeat(60) + "\n";
-    for (const [key, value] of Object.entries(extraction.raw_structured)) {
-      output += key + ": " + JSON.stringify(value) + "\n";
-    }
-  }
-  
-  return output;
-}
-
-/**
- * Format scope output for display
- */
-export function formatScopeOutput(scope) {
-  if (!scope) return "No scope data available.";
-  
-  let output = "SCOPE ANALYSIS\n";
-  output += "=".repeat(60) + "\n\n";
-  
-  if (scope.rationale) {
-    output += "Rationale:\n";
-    output += "-".repeat(60) + "\n";
-    output += scope.rationale + "\n\n";
-  }
-  
-  if (scope.removed_text && scope.removed_text.trim().length > 0) {
+  // Removed vs cleaned text
+  if (preprocess.removed_text && preprocess.removed_text.trim().length > 0) {
     output += "REMOVED TEXT (Out of Scope)\n";
     output += "-".repeat(60) + "\n";
-    output += scope.removed_text + "\n\n";
+    output += preprocess.removed_text + "\n\n";
   } else {
     output += "REMOVED TEXT: None\n\n";
   }
   
-  if (scope.necessary_text && scope.necessary_text.trim().length > 0) {
-    output += "NECESSARY TEXT (Extracted)\n";
+  if (preprocess.cleaned_text && preprocess.cleaned_text.trim().length > 0) {
+    output += "CLEANED TEXT (Used for requirements)\n";
     output += "-".repeat(60) + "\n";
-    output += scope.necessary_text + "\n\n";
+    output += preprocess.cleaned_text + "\n\n";
   } else {
-    output += "NECESSARY TEXT: None\n\n";
+    output += "CLEANED TEXT: None\n\n";
   }
   
-  if (scope.comparison_agreement !== undefined) {
+  // Comparison validation
+  if (preprocess.comparison_agreement !== undefined) {
     output += "COMPARISON VALIDATION\n";
     output += "-".repeat(60) + "\n";
-    output += "Agreement: " + (scope.comparison_agreement ? "Yes" : "No") + "\n";
-    if (scope.comparison_notes) {
-      output += "Notes: " + scope.comparison_notes + "\n";
+    output += "Agreement: " + (preprocess.comparison_agreement ? "Yes" : "No") + "\n";
+    if (preprocess.comparison_notes) {
+      output += "Notes: " + preprocess.comparison_notes + "\n";
     }
     output += "\n";
-  }
-  
-  output += "CLEANED TEXT (Same as Necessary Text)\n";
-  output += "-".repeat(60) + "\n";
-  if (scope.cleaned_text) {
-    output += scope.cleaned_text + "\n\n";
-  } else {
-    output += "No cleaned text available.\n\n";
   }
   
   return output;

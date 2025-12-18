@@ -4,11 +4,10 @@ import './ProgressTracker.css'
 
 const PIPELINE_STEPS = [
   { id: 'ocr', label: 'OCR', order: 1 },
-  { id: 'extraction', label: 'Extraction', order: 2 },
-  { id: 'scope', label: 'Scope', order: 3 },
-  { id: 'requirements', label: 'Requirements', order: 4 },
-  { id: 'build-query', label: 'Build Query', order: 5 },
-  { id: 'response', label: 'Response', order: 6 },
+  { id: 'preprocess', label: 'Preprocess', order: 2 },
+  { id: 'requirements', label: 'Requirements', order: 3 },
+  { id: 'build-query', label: 'Build Query', order: 4 },
+  { id: 'response', label: 'Response', order: 5 },
 ]
 
 export default function ProgressTracker() {
@@ -17,8 +16,8 @@ export default function ProgressTracker() {
   const getStepStatus = (stepId) => {
     const status = statuses[stepId] || 'waiting'
     
-    // Special handling for requirements (needs scope acceptance)
-    if (stepId === 'requirements' && !confirmations.scopeAccepted && status === 'waiting') {
+    // Preprocess must be confirmed before moving to requirements
+    if (stepId === 'requirements' && !confirmations.preprocessConfirmed && status === 'waiting') {
       return 'blocked'
     }
     

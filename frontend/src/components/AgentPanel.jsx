@@ -1,51 +1,44 @@
 import React, { useEffect, useState } from 'react'
 import { usePipeline } from '../context/PipelineContext'
-import { runRequirements, buildQuery, generateResponse, generateQuestions, createChatSession, addQuestionsToSession, previewResponses, updateResponse, generatePDFFromPreview, updateScope, updateRequirements, getSession } from '../services/api'
+import { runRequirements, buildQuery, generateResponse, generateQuestions, createChatSession, addQuestionsToSession, previewResponses, updateResponse, generatePDFFromPreview, updateRequirements, getSession } from '../services/api'
 import StatusPill from './StatusPill'
 import OutputDisplay from './OutputDisplay'
 import Button from './Button'
 import ChatInterface from './ChatInterface'
 import ResponsePreview from './ResponsePreview'
-import { formatExtractionOutput, formatScopeOutput, formatRequirementsOutput } from '../utils/formatters'
+import { formatPreprocessOutput, formatRequirementsOutput } from '../utils/formatters'
 import './AgentPanel.css'
 
 const AGENT_CONFIGS = {
   ocr: {
     title: '1. Raw OCR Text',
-    description: 'Full text extracted from the original PDF/DOCX. Uses direct extraction (pdfplumber/python-docx) when possible, falls back to Qwen vision model for scanned/image-based documents.',
+    description: 'Full text extracted from the original PDF/DOCX. Uses direct text readers when possible, falls back to Qwen vision model for scanned/image-based documents.',
     badge: null,
     showStatus: false,
   },
-  extraction: {
-    title: '2. Extraction Agent',
+  preprocess: {
+    title: '2. Preprocess Agent',
     pillLabel: 'gpt-5-chat',
-    badge: 'Translated text + codes & metadata',
+    badge: 'Cleaned text + removed content + CPV / summary',
     showStatus: true,
-  },
-  scope: {
-    title: '3. Scope Agent',
-    pillLabel: 'gpt-5-chat',
-    badge: 'Essential text vs removed content',
-    showStatus: true,
-    showAccept: true,
   },
   requirements: {
-    title: '4. Requirements Agent',
+    title: '3. Requirements Agent',
     pillLabel: 'gpt-5-chat',
     badge: 'Solution vs response-structure requirements',
     showStatus: true,
     showBuildQuery: true,
   },
   'build-query': {
-    title: '5. Build Query',
+    title: '4. Build Query',
     pillLabel: 'Consolidated',
-    badge: 'Consolidated query from requirements and extraction data',
+    badge: 'Consolidated query from requirements and preprocess metadata',
     showStatus: true,
     showConfirm: true,
     showGenerate: true,
   },
   response: {
-    title: '6. RFP Response',
+    title: '5. RFP Response',
     pillLabel: 'gpt-5-chat',
     badge: 'Generated RFP response',
     showStatus: true,
@@ -71,7 +64,7 @@ export default function AgentPanel({ agentId }) {
   const [showChat, setShowChat] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [previewData, setPreviewData] = useState(null)
-  const [scopeDraft, setScopeDraft] = useState('')
+  const [preprocessDraft, setPreprocessDraft] = useState('')
   const [requirementsDraft, setRequirementsDraft] = useState('')
   const [buildQueryDraft, setBuildQueryDraft] = useState('')
   const [questionsGenerated, setQuestionsGenerated] = useState(false)
@@ -152,23 +145,15 @@ export default function AgentPanel({ agentId }) {
   }, [chatSessionId, questionsGenerated])
   const config = AGENT_CONFIGS[agentId]
 
-  // Handle scope acceptance
-  useEffect(() => {
-    if (agentId === 'scope' && confirmations.scopeAccepted && !pipelineData.requirements) {
-      handleRunRequirements()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [confirmations.scopeAccepted, agentId])
-
   // Handle build query button click
   const handleBuildQuery = async () => {
-    if (!pipelineData.extraction || !pipelineData.requirements) {
+    if (!pipelineData.preprocess || !pipelineData.requirements) {
       return
     }
 
     try {
       updateStatus('build-query', 'processing')
-      const buildQueryData = await buildQuery(pipelineData.extraction, pipelineData.requirements)
+      const buildQueryData = await buildQuery(pipelineData.preprocess, pipelineData.requirements)
       updatePipelineData('buildQuery', buildQueryData)
       updateStatus('build-query', 'complete')
       setSummary('Query built. Review and edit if needed, then confirm to generate questions.')
@@ -189,14 +174,19 @@ export default function AgentPanel({ agentId }) {
 
   // Handle requirements generation
   const handleRunRequirements = async () => {
-    if (!pipelineData.scope?.cleaned_text) {
+    if (!pipelineData.preprocess?.cleaned_text) {
+      console.warn('Cannot run requirements: preprocess not ready', {
+        hasPreprocess: !!pipelineData.preprocess,
+        hasCleanedText: !!pipelineData.preprocess?.cleaned_text,
+      })
       return
     }
 
     try {
+      console.log('Starting requirements agent...')
       updateStatus('requirements', 'processing')
-      setSummary('Processing...')
-      const reqData = await runRequirements(pipelineData.scope.cleaned_text)
+      setSummary('Starting requirements agent...')
+      const reqData = await runRequirements(pipelineData.preprocess.cleaned_text)
       updatePipelineData('requirements', reqData)
       updateStatus('requirements', 'complete')
       let reqSummary = `Solution: ${reqData?.solution_requirements?.length || 0}, Response structure: ${reqData?.response_structure_requirements?.length || 0}`
@@ -223,9 +213,48 @@ export default function AgentPanel({ agentId }) {
     }
   }
 
+  // Handle preprocess editing
+  const handleTogglePreprocessEdit = () => {
+    if (!pipelineData.preprocess) return
+    setPreprocessDraft(JSON.stringify(pipelineData.preprocess, null, 2))
+    updateEditable('preprocess', !editable.preprocess)
+  }
+
+  const handleSavePreprocess = () => {
+    try {
+      let parsed
+      try {
+        parsed = JSON.parse(preprocessDraft)
+      } catch (e) {
+        alert('Preprocess JSON is invalid. Please fix the syntax before saving.')
+        return
+      }
+
+      // Update preprocess locally
+      updatePipelineData('preprocess', parsed)
+
+      // Reset downstream steps because preprocess changed
+      updatePipelineData('requirements', null)
+      updatePipelineData('buildQuery', null)
+      updatePipelineData('response', null)
+      updateStatus('requirements', 'waiting')
+      updateStatus('build-query', 'waiting')
+      updateStatus('response', 'waiting')
+      updateConfirmation('preprocessConfirmed', false)
+      updateConfirmation('buildQueryConfirmed', false)
+
+      updateEditable('preprocess', false)
+      setSummary('Preprocess updated. Please review and confirm before running requirements.')
+    } catch (err) {
+      console.error('Failed to update preprocess:', err)
+      alert(`Failed to update preprocess: ${err.message}`)
+      updateStatus('preprocess', 'error')
+    }
+  }
+
   // Handle preview responses
   const handlePreviewResponses = async () => {
-    if (!pipelineData.extraction || !pipelineData.requirements || !confirmations.buildQueryConfirmed) {
+    if (!pipelineData.preprocess || !pipelineData.requirements || !confirmations.buildQueryConfirmed) {
       return
     }
 
@@ -234,7 +263,7 @@ export default function AgentPanel({ agentId }) {
       setSummary('Generating responses for preview... This may take several minutes.')
       
       const previewData = await previewResponses(
-        pipelineData.extraction,
+        pipelineData.preprocess,
         pipelineData.requirements,
         { 
           use_rag: true, 
@@ -257,9 +286,9 @@ export default function AgentPanel({ agentId }) {
 
   // Handle response generation (direct PDF)
   const handleGenerateResponse = async () => {
-    if (!pipelineData.extraction || !pipelineData.requirements || !confirmations.buildQueryConfirmed) {
+    if (!pipelineData.preprocess || !pipelineData.requirements || !confirmations.buildQueryConfirmed) {
       console.warn('Cannot generate response: missing data or confirmation', {
-        hasExtraction: !!pipelineData.extraction,
+        hasPreprocess: !!pipelineData.preprocess,
         hasRequirements: !!pipelineData.requirements,
         buildQueryConfirmed: confirmations.buildQueryConfirmed
       })
@@ -275,7 +304,7 @@ export default function AgentPanel({ agentId }) {
       updateStatus('response', 'processing')
       setSummary('Generating response for each requirement... This may take several minutes.')
       const response = await generateResponse(
-        pipelineData.extraction,
+        pipelineData.preprocess,
         pipelineData.requirements,
         { 
           use_rag: true, 
@@ -342,7 +371,7 @@ export default function AgentPanel({ agentId }) {
       
       const response = await generatePDFFromPreview(
         previewData.preview_id,
-        pipelineData.extraction,
+        pipelineData.preprocess,
         pipelineData.requirements,
         format
       )
@@ -374,14 +403,9 @@ export default function AgentPanel({ agentId }) {
     switch (agentId) {
       case 'ocr':
         return pipelineData.ocr || 'Waiting for OCR…'
-      case 'extraction':
-        return pipelineData.extraction ? formatExtractionOutput(pipelineData.extraction) : 'Processing...'
-      case 'scope':
-        return pipelineData.scope ? formatScopeOutput(pipelineData.scope) : 'Waiting for extraction...'
+      case 'preprocess':
+        return pipelineData.preprocess ? formatPreprocessOutput(pipelineData.preprocess) : 'Processing...'
       case 'requirements':
-        if (!confirmations.scopeAccepted) {
-          return 'Accept scoped text to reveal…'
-        }
         let reqOutput = pipelineData.requirements ? formatRequirementsOutput(pipelineData.requirements) : 'Processing...'
         // Add structure detection info if available
         if (pipelineData.requirements?.structure_detection) {
@@ -431,22 +455,16 @@ export default function AgentPanel({ agentId }) {
     if (summary) return summary
 
     switch (agentId) {
-      case 'extraction':
-        if (pipelineData.extraction) {
-          const ext = pipelineData.extraction
-          return `Language: ${ext.language || 'unknown'}, CPV codes: ${ext.cpv_codes?.length || 0}, Other codes: ${ext.other_codes?.length || 0}`
-        }
-        return 'Waiting...'
-      case 'scope':
-        if (pipelineData.scope) {
-          const scope = pipelineData.scope
-          return `Necessary: ${scope.necessary_text?.length || 0} chars, Comparison: ${scope.comparison_agreement !== undefined ? (scope.comparison_agreement ? 'Agreed' : 'Disagreed') : 'N/A'}`
+      case 'preprocess':
+        if (pipelineData.preprocess) {
+          const pp = pipelineData.preprocess
+          const base = `Language: ${pp.language || 'unknown'}, Cleaned: ${pp.cleaned_text?.length || 0} chars`
+          return confirmations.preprocessConfirmed
+            ? `${base} (confirmed)`
+            : base
         }
         return 'Waiting...'
       case 'requirements':
-        if (!confirmations.scopeAccepted) {
-          return 'Waiting for scope approval'
-        }
         if (pipelineData.requirements) {
           const req = pipelineData.requirements
           let summary = `Solution: ${req.solution_requirements?.length || 0}, Response structure: ${req.response_structure_requirements?.length || 0}`
@@ -512,31 +530,6 @@ export default function AgentPanel({ agentId }) {
       setSummary('Query confirmed. (Question generation failed - you can still proceed)')
     } finally {
       setQuestionsGenerated(true)
-    }
-  }
-
-  const handleToggleScopeEdit = () => {
-    if (!pipelineData.scope) return
-    const initial = pipelineData.scope.necessary_text || ''
-    setScopeDraft(initial)
-    updateEditable('scope', !editable.scope)
-  }
-
-  const handleSaveScope = async () => {
-    try {
-      updateStatus('scope', 'processing')
-      const updated = await updateScope(
-        scopeDraft,
-        pipelineData.scope?.removed_text || '',
-        pipelineData.scope?.rationale || 'Manually edited by user.'
-      )
-      updatePipelineData('scope', updated)
-      updateStatus('scope', 'complete')
-      updateEditable('scope', false)
-    } catch (err) {
-      console.error('Failed to update scope:', err)
-      alert(`Failed to update scope: ${err.message}`)
-      updateStatus('scope', 'error')
     }
   }
 
@@ -614,22 +607,22 @@ export default function AgentPanel({ agentId }) {
       )}
      
       {/* Scope / Requirements / Build Query editable views */}
-      {agentId === 'scope' && editable.scope && pipelineData.scope ? (
+      {agentId === 'preprocess' && editable.preprocess && pipelineData.preprocess ? (
         <div className="editable-section">
           <label className="edit-label">
-            Edit scoped text before confirming:
+            Edit preprocess JSON before running requirements:
           </label>
           <textarea
             className="edit-textarea"
-            value={scopeDraft}
-            onChange={(e) => setScopeDraft(e.target.value)}
-            rows={16}
+            value={preprocessDraft}
+            onChange={(e) => setPreprocessDraft(e.target.value)}
+            rows={20}
           />
           <div className="edit-actions">
-            <Button onClick={handleSaveScope} disabled={status === 'processing'}>
-              Save scoped text
+            <Button onClick={handleSavePreprocess} disabled={status === 'processing'}>
+              Save preprocess
             </Button>
-            <Button variant="secondary" onClick={handleToggleScopeEdit}>
+            <Button variant="secondary" onClick={handleTogglePreprocessEdit}>
               Cancel
             </Button>
           </div>
@@ -677,24 +670,53 @@ export default function AgentPanel({ agentId }) {
       ) : (
         <OutputDisplay content={content} />
       )}
-      
-      {agentId === 'scope' && pipelineData.scope && (
-        <div className="accept-row" style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
-          {config.showAccept && (
-            <Button
-              onClick={() => updateConfirmation('scopeAccepted', !confirmations.scopeAccepted)}
-              className={confirmations.scopeAccepted ? 'accepted' : ''}
-            >
-              {confirmations.scopeAccepted ? '✓ Scope accepted' : 'Accept scoped text'}
-            </Button>
-          )}
-          <Button onClick={handleToggleScopeEdit}>
-            {editable.scope ? 'Close editor' : 'Edit scoped text'}
+
+      {/* Preprocess confirm + edit actions */}
+      {agentId === 'preprocess' && pipelineData.preprocess && (
+        <div className="accept-row">
+          <Button
+            onClick={async () => {
+              console.log('Confirm preprocess clicked', {
+                currentState: confirmations.preprocessConfirmed,
+                requirementsStatus: statuses.requirements,
+              })
+              
+              // Set flag to allow requirements to run
+              updateConfirmation('preprocessConfirmed', true)
+              console.log('Preprocess confirmed - automatically starting requirements agent...')
+              
+              // Automatically trigger requirements agent
+              await handleRunRequirements()
+            }}
+            className={
+              statuses.requirements === 'processing' || statuses.requirements === 'complete'
+                ? 'accepted'
+                : ''
+            }
+            disabled={
+              status === 'processing' || 
+              statuses.requirements === 'processing' || 
+              statuses.requirements === 'complete'
+            }
+          >
+            {statuses.requirements === 'processing' || statuses.requirements === 'complete'
+              ? '✓ Preprocess confirmed'
+              : statuses.requirements === 'error'
+              ? 'Retry requirements'
+              : 'Confirm preprocess'}
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={handleTogglePreprocessEdit}
+            style={{ marginLeft: '0.5rem' }}
+            disabled={statuses.requirements === 'processing' || statuses.requirements === 'complete'}
+          >
+            {editable.preprocess ? 'Close editor' : 'Edit preprocess JSON'}
           </Button>
         </div>
       )}
-      
-      {config.showBuildQuery && agentId === 'requirements' && confirmations.scopeAccepted && pipelineData.requirements && (
+
+      {config.showBuildQuery && agentId === 'requirements' && pipelineData.requirements && (
         <div className="accept-row">
           {chatSessionId && showChat && (
             <div style={{ 
