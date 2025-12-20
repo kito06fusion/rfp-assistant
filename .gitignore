@@ -45,3 +45,6 @@ rag_query_cache.pkl
 # Temporary
 *.tmp
 /tmp/
+
+
+.env
