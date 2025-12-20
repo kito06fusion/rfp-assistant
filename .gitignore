@@ -34,6 +34,7 @@ dist/
 # Environment
 .env
 .env.local
+.env.*
 
 # Output
 output/pdfs/*.pdf
@@ -45,6 +46,3 @@ rag_query_cache.pkl
 # Temporary
 *.tmp
 /tmp/
-
-
-.env
