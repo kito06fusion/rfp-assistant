@@ -4,12 +4,17 @@ import ChatInterface from './ChatInterface'
 import './ChatPanel.css'
 
 export default function ChatPanel() {
-  const { chatSessionId, pipelineData, updatePipelineData } = usePipeline()
+  const { chatSessionId, pipelineData, updatePipelineData, setAllQuestionsAnswered } = usePipeline()
   const [isMinimized, setIsMinimized] = useState(false)
 
   const handleBuildQueryUpdated = (updatedBuildQuery) => {
     if (!updatedBuildQuery) return
     updatePipelineData('buildQuery', updatedBuildQuery)
+  }
+  
+  const handleAllAnswered = () => {
+    console.log('All critical questions answered!')
+    setAllQuestionsAnswered(true)
   }
 
   // Only show if there's an active session
@@ -20,8 +25,8 @@ export default function ChatPanel() {
           <h3>Interactive Q&A</h3>
         </div>
         <div className="chat-panel-empty-content">
-          <p>Questions will appear here after the build query is analyzed.</p>
-          <p className="chat-panel-hint">The LLM will ask you for any missing information needed to generate high-quality responses.</p>
+          <p>Questions will appear here after confirming the build query.</p>
+          <p className="chat-panel-hint">The system searches RAG first, then asks only critical questions one at a time.</p>
         </div>
       </div>
     )
@@ -46,6 +51,9 @@ export default function ChatPanel() {
             onClose={null}
             buildQuery={pipelineData.buildQuery}
             onBuildQueryUpdated={handleBuildQueryUpdated}
+            requirements={pipelineData.requirements}
+            iterativeMode={true}
+            onAllAnswered={handleAllAnswered}
           />
         </div>
       )}

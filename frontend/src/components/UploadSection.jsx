@@ -5,29 +5,34 @@ import './UploadSection.css'
 
 export default function UploadSection() {
   const { updatePipelineData, updateStatus, resetPipeline } = usePipeline()
-  const [file, setFile] = useState(null)
+  const [files, setFiles] = useState([])
   const [status, setStatus] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
 
   const handleFileChange = (e) => {
-    const selectedFile = e.target.files[0]
-    setFile(selectedFile)
-    setStatus('')
+    const selectedFiles = Array.from(e.target.files)
+    setFiles(selectedFiles)
+    if (selectedFiles.length > 1) {
+      setStatus(`${selectedFiles.length} files selected`)
+    } else {
+      setStatus('')
+    }
   }
 
   const handleUpload = async () => {
-    if (!file) {
-      setStatus('Please choose a PDF or DOCX file first.')
+    if (files.length === 0) {
+      setStatus('Please choose at least one file first.')
       return
     }
 
     setIsProcessing(true)
     resetPipeline()
-    setStatus('Uploading and running agents… this may take a moment.')
+    const fileCount = files.length
+    setStatus(`Uploading ${fileCount} file${fileCount > 1 ? 's' : ''} and running agents… this may take a moment.`)
 
     try {
       updateStatus('preprocess', 'processing')
-      const data = await processRFP(file)
+      const data = await processRFP(files)
 
       // Update pipeline data
       updatePipelineData('ocr', data.ocr_source_text || 'No OCR text returned.')
@@ -39,7 +44,7 @@ export default function UploadSection() {
       setStatus('Preprocess step finished. You can now run the requirements agent.')
     } catch (err) {
       console.error(err)
-      setStatus(`Failed to process file: ${err.message}`)
+      setStatus(`Failed to process files: ${err.message}`)
       updateStatus('preprocess', 'error')
     } finally {
       setIsProcessing(false)
@@ -58,13 +63,14 @@ export default function UploadSection() {
           accept=".pdf,.doc,.docx,.xls,.xlsx,.txt"
           onChange={handleFileChange}
           disabled={isProcessing}
+          multiple
         />
         <button
           id="upload-btn"
           onClick={handleUpload}
-          disabled={isProcessing || !file}
+          disabled={isProcessing || files.length === 0}
         >
-          {isProcessing ? 'Processing…' : 'Upload & process'}
+          {isProcessing ? 'Processing…' : `Upload & process${files.length > 1 ? ` (${files.length})` : ''}`}
         </button>
       </div>
       {status && (

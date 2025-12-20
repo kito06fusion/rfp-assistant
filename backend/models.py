@@ -120,6 +120,7 @@ class Question(BaseModel):
 
 class Answer(BaseModel):
     question_id: str = Field(description="ID of the question being answered")
+    question_text: Optional[str] = Field(default=None, description="The question text that was answered")
     answer_text: str = Field(description="The answer provided by the user")
     answered_at: Optional[str] = Field(default=None, description="Timestamp when answer was provided")
 

@@ -1,9 +1,13 @@
 const API_BASE =
   import.meta.env.VITE_API_URL || "http://127.0.0.1:8001";
 
-export async function processRFP(file) {
+export async function processRFP(files) {
   const formData = new FormData();
-  formData.append("file", file);
+  // Support both single file and array of files
+  const fileArray = Array.isArray(files) ? files : [files];
+  fileArray.forEach((file) => {
+    formData.append("files", file);
+  });
 
   const response = await fetch(`${API_BASE}/process-rfp`, {
     method: "POST",
@@ -280,6 +284,56 @@ export async function enrichBuildQuery(buildQuery, sessionId = null) {
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Enrich build query error ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  return await response.json();
+}
+
+// =============================================================================
+// ITERATIVE QUESTION FLOW
+// =============================================================================
+
+/**
+ * Get the next single critical question (iterative flow).
+ * Returns null when no more questions needed.
+ */
+export async function getNextQuestion(requirements, sessionId = null) {
+  const response = await fetch(`${API_BASE}/get-next-question`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      requirements,
+      session_id: sessionId,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Get next question error ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Submit an answer and get the next question (if any).
+ */
+export async function submitAnswerAndGetNext(sessionId, questionId, questionText, answerText, requirements) {
+  const response = await fetch(`${API_BASE}/submit-answer-get-next`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: sessionId,
+      question_id: questionId,
+      question_text: questionText,
+      answer_text: answerText,
+      requirements,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Submit answer error ${response.status}: ${text.slice(0, 200)}`);
   }
 
   return await response.json();

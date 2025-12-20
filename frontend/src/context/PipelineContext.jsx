@@ -38,6 +38,7 @@ export function PipelineProvider({ children }) {
   })
   
   const [chatSessionId, setChatSessionId] = useState(null)
+  const [allQuestionsAnswered, setAllQuestionsAnswered] = useState(false)
 
   const updatePipelineData = useCallback((key, value) => {
     setPipelineData(prev => ({ ...prev, [key]: value }))
@@ -79,6 +80,7 @@ export function PipelineProvider({ children }) {
       buildQuery: false,
     })
     setChatSessionId(null)
+    setAllQuestionsAnswered(false)
     setActiveTab('ocr')
   }, [])
 
@@ -98,6 +100,8 @@ export function PipelineProvider({ children }) {
         resetPipeline,
         chatSessionId,
         setChatSessionId,
+        allQuestionsAnswered,
+        setAllQuestionsAnswered,
       }}
     >
       {children}

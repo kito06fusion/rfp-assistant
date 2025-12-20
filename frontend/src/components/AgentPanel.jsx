@@ -58,6 +58,8 @@ export default function AgentPanel({ agentId }) {
     setChatSessionId,
     editable,
     updateEditable,
+    allQuestionsAnswered,
+    setAllQuestionsAnswered,
   } = usePipeline()
 
   const [summary, setSummary] = useState('')
@@ -68,7 +70,6 @@ export default function AgentPanel({ agentId }) {
   const [requirementsDraft, setRequirementsDraft] = useState('')
   const [buildQueryDraft, setBuildQueryDraft] = useState('')
   const [questionsGenerated, setQuestionsGenerated] = useState(false)
-  const [allQuestionsAnswered, setAllQuestionsAnswered] = useState(false)
   
   // Auto-show chat when viewing requirements panel if session exists
   useEffect(() => {
@@ -496,38 +497,30 @@ export default function AgentPanel({ agentId }) {
   const content = getContent()
   const summaryText = getSummaryText()
   
-  // Run question generation once, without marking final confirmation
+  // Start iterative question flow - creates session and lets ChatInterface handle the rest
   const handleGenerateQuestionsOnce = async () => {
     if (!pipelineData.buildQuery || !pipelineData.requirements || questionsGenerated) {
       return
     }
 
     try {
-      const questionsData = await generateQuestions(pipelineData.requirements, pipelineData.buildQuery)
-      console.log('Questions generated from build query:', questionsData)
-
-      // Update build query with any RAG-supported information from backend
-      if (questionsData.enriched_build_query) {
-        updatePipelineData('buildQuery', questionsData.enriched_build_query)
-      }
-
-      if (questionsData.questions && questionsData.questions.length > 0) {
-        console.log(`Found ${questionsData.questions.length} questions, creating chat session...`)
-        const sessionData = await createChatSession()
-        await addQuestionsToSession(sessionData.session_id, questionsData.questions)
-        setChatSessionId(sessionData.session_id)
-        setAllQuestionsAnswered(false) // Questions exist, need to be answered
-        setSummary(`Query confirmed. ${questionsData.questions.length} question(s) available in chat panel.`)
-        console.log('Chat session created:', sessionData.session_id)
-        console.log(`Generated ${questionsData.questions.length} question(s). Check the chat panel on the right.`)
-      } else {
-        console.log('No questions generated (all information is clear in knowledge base / RAG)')
-        setAllQuestionsAnswered(true) // No questions means all are "answered"
-        setSummary('Query confirmed. No additional questions needed.')
-      }
-    } catch (qErr) {
-      console.error('Failed to generate questions:', qErr)
-      setSummary('Query confirmed. (Question generation failed - you can still proceed)')
+      console.log('Starting iterative question flow...')
+      setSummary('Searching RAG for existing information...')
+      
+      // Create a session - the ChatInterface will use iterative mode to get questions one at a time
+      const sessionData = await createChatSession()
+      setChatSessionId(sessionData.session_id)
+      console.log('Session created:', sessionData.session_id)
+      
+      // The ChatInterface with iterativeMode=true will call getNextQuestion on mount
+      // and handle the one-at-a-time flow
+      setAllQuestionsAnswered(false)
+      setSummary('Query confirmed. Check the Q&A panel for any critical questions.')
+      
+    } catch (err) {
+      console.error('Failed to start question flow:', err)
+      setSummary('Query confirmed. (Question check failed - you can still proceed)')
+      setAllQuestionsAnswered(true)
     } finally {
       setQuestionsGenerated(true)
     }

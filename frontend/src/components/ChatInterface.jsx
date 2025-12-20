@@ -1,24 +1,39 @@
 import React, { useState, useEffect, useRef } from 'react'
 import './ChatInterface.css'
-import { enrichBuildQuery } from '../services/api'
+import { enrichBuildQuery, getNextQuestion, submitAnswerAndGetNext } from '../services/api'
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8001"
 
-export default function ChatInterface({ sessionId, onClose, buildQuery, onBuildQueryUpdated }) {
+export default function ChatInterface({ 
+  sessionId, 
+  onClose, 
+  buildQuery, 
+  onBuildQueryUpdated,
+  requirements,  // For iterative mode
+  iterativeMode = false,  // Use iterative one-at-a-time flow
+  onAllAnswered,  // Callback when all questions answered
+}) {
   const [conversation, setConversation] = useState([]) // Q&A pairs in order
   const [allQuestions, setAllQuestions] = useState([]) // All questions from session
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
+  const [currentQuestion, setCurrentQuestion] = useState(null) // For iterative mode
+  const [remainingGaps, setRemainingGaps] = useState(0)
   const [inputText, setInputText] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingSession, setIsLoadingSession] = useState(true)
   const [isProcessingAnswer, setIsProcessingAnswer] = useState(false)
+  const [allDone, setAllDone] = useState(false)
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
     if (sessionId) {
-      loadSession()
+      if (iterativeMode && requirements) {
+        loadFirstQuestion()
+      } else {
+        loadSession()
+      }
     }
-  }, [sessionId])
+  }, [sessionId, iterativeMode, requirements])
 
   useEffect(() => {
     scrollToBottom()
@@ -26,6 +41,33 @@ export default function ChatInterface({ sessionId, onClose, buildQuery, onBuildQ
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  // Iterative mode: load first critical question
+  const loadFirstQuestion = async () => {
+    setIsLoadingSession(true)
+    try {
+      console.log('Iterative: Getting first critical question')
+      const result = await getNextQuestion(requirements, sessionId)
+      console.log('First question result:', result)
+      
+      if (result.question) {
+        setCurrentQuestion(result.question)
+        setRemainingGaps(result.remaining_gaps || 0)
+        setAllQuestions([result.question])
+        setAllDone(false)
+      } else {
+        setCurrentQuestion(null)
+        setAllDone(true)
+        if (onAllAnswered) onAllAnswered()
+      }
+    } catch (err) {
+      console.error('Failed to get first question:', err)
+      setAllDone(true)
+      if (onAllAnswered) onAllAnswered()
+    } finally {
+      setIsLoadingSession(false)
+    }
   }
 
   const loadSession = async () => {
@@ -78,7 +120,65 @@ export default function ChatInterface({ sessionId, onClose, buildQuery, onBuildQ
     }
   }
 
+  // Iterative mode: submit and get next question
+  const handleIterativeSubmit = async () => {
+    if (!inputText.trim() || isLoading || isProcessingAnswer || !currentQuestion) return
+
+    setIsLoading(true)
+    setIsProcessingAnswer(true)
+    try {
+      const result = await submitAnswerAndGetNext(
+        sessionId,
+        currentQuestion.question_id,
+        currentQuestion.question_text,
+        inputText,
+        requirements
+      )
+      console.log('Submit result:', result)
+      
+      // Add to conversation
+      setConversation(prev => [...prev, {
+        question: currentQuestion,
+        answer: { answer_text: inputText },
+        index: prev.length,
+      }])
+      setInputText('')
+      
+      if (result.next_question) {
+        setCurrentQuestion(result.next_question)
+        setRemainingGaps(result.remaining_gaps || 0)
+        setAllQuestions(prev => [...prev, result.next_question])
+      } else {
+        setCurrentQuestion(null)
+        setAllDone(true)
+        setRemainingGaps(0)
+        if (onAllAnswered) onAllAnswered()
+      }
+      
+      // Enrich build query
+      if (buildQuery && onBuildQueryUpdated) {
+        try {
+          const updated = await enrichBuildQuery(buildQuery, sessionId)
+          onBuildQueryUpdated(updated)
+        } catch (e) {
+          console.error('Failed to enrich build query:', e)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to submit answer:', err)
+      alert('Failed to submit answer. Please try again.')
+    } finally {
+      setIsLoading(false)
+      setIsProcessingAnswer(false)
+    }
+  }
+
   const handleSubmitAnswer = async () => {
+    // Use iterative mode if enabled
+    if (iterativeMode) {
+      return handleIterativeSubmit()
+    }
+    
     if (!inputText.trim() || isLoading || isProcessingAnswer) return
 
     const currentQ = allQuestions[currentQuestionIndex]
@@ -148,7 +248,8 @@ export default function ChatInterface({ sessionId, onClose, buildQuery, onBuildQ
     }
   }
 
-  const currentQuestion = allQuestions[currentQuestionIndex]
+  // In iterative mode, use currentQuestion state; otherwise use array index
+  const activeQuestion = iterativeMode ? currentQuestion : allQuestions[currentQuestionIndex]
   const totalQuestions = allQuestions.length
   const answeredCount = conversation.length
   const progress = totalQuestions > 0 ? Math.round((Math.min(answeredCount, totalQuestions) / totalQuestions) * 100) : 0
@@ -169,7 +270,8 @@ export default function ChatInterface({ sessionId, onClose, buildQuery, onBuildQ
     )
   }
 
-  if (totalQuestions === 0) {
+  // No questions needed (iterative mode found no gaps, or legacy mode has no questions)
+  if ((iterativeMode && allDone && answeredCount === 0) || (!iterativeMode && totalQuestions === 0)) {
     return (
       <div className="chat-interface">
         <div className="chat-header">
@@ -179,7 +281,10 @@ export default function ChatInterface({ sessionId, onClose, buildQuery, onBuildQ
           )}
         </div>
         <div className="chat-empty">
-          <p>No questions available. All information is clear or available in the knowledge base.</p>
+          <p>✓ No questions needed!</p>
+          <p style={{fontSize: '0.85rem', color: '#9ca3af', marginTop: '0.5rem'}}>
+            All critical information is available in the knowledge base.
+          </p>
         </div>
       </div>
     )
@@ -189,13 +294,19 @@ export default function ChatInterface({ sessionId, onClose, buildQuery, onBuildQ
     <div className="chat-interface">
       <div className="chat-header">
         <div>
-          {answeredCount >= totalQuestions || !currentQuestion ? (
+          {iterativeMode ? (
             <p className="chat-progress-text">
-              All {totalQuestions} questions answered ({progress}% complete)
+              {allDone 
+                ? `✓ All questions answered (${answeredCount})`
+                : `Question ${answeredCount + 1}${remainingGaps > 0 ? ` • ~${remainingGaps} more` : ''}`
+              }
             </p>
           ) : (
             <p className="chat-progress-text">
-              Question {answeredCount + 1} of {totalQuestions} ({progress}% complete)
+              {answeredCount >= totalQuestions || !activeQuestion
+                ? `All ${totalQuestions} questions answered`
+                : `Question ${answeredCount + 1} of ${totalQuestions}`
+              }
             </p>
           )}
         </div>
@@ -207,11 +318,11 @@ export default function ChatInterface({ sessionId, onClose, buildQuery, onBuildQ
       <div className="chat-messages">
         {/* Show conversation history */}
         {conversation.map((item, idx) => (
-          <React.Fragment key={`qa-${item.index}`}>
+          <React.Fragment key={`qa-${idx}`}>
             <div className="chat-message chat-message-question">
               <div className="question-bubble">
                 <div className="question-header">
-                  <span className="question-label">Question {item.index + 1}</span>
+                  <span className="question-label">Question {idx + 1}</span>
                   {item.question.priority && (
                     <span className={`priority-badge priority-${item.question.priority}`}>
                       {item.question.priority}
@@ -233,22 +344,27 @@ export default function ChatInterface({ sessionId, onClose, buildQuery, onBuildQ
           </React.Fragment>
         ))}
         
-        {/* Show current question prominently */}
-        {currentQuestion && (
+        {/* Show current question */}
+        {activeQuestion && !allDone && (
           <div className="current-question-section">
             <div className="chat-message chat-message-question current-question-active">
               <div className="question-bubble question-bubble-current">
                 <div className="question-header">
-                  <span className="question-label">Question {currentQuestionIndex + 1} of {totalQuestions}</span>
-                  {currentQuestion.priority && (
-                    <span className={`priority-badge priority-${currentQuestion.priority}`}>
-                      {currentQuestion.priority}
+                  <span className="question-label">
+                    {iterativeMode 
+                      ? `Question ${answeredCount + 1}` 
+                      : `Question ${currentQuestionIndex + 1} of ${totalQuestions}`
+                    }
+                  </span>
+                  {activeQuestion.priority && (
+                    <span className={`priority-badge priority-${activeQuestion.priority}`}>
+                      {activeQuestion.priority}
                     </span>
                   )}
                 </div>
-                <p className="question-text">{currentQuestion.question_text}</p>
-                {currentQuestion.context && (
-                  <p className="question-context">Why: {currentQuestion.context}</p>
+                <p className="question-text">{activeQuestion.question_text}</p>
+                {activeQuestion.context && (
+                  <p className="question-context">Why: {activeQuestion.context}</p>
                 )}
               </div>
             </div>
@@ -260,7 +376,7 @@ export default function ChatInterface({ sessionId, onClose, buildQuery, onBuildQ
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyPress}
-                placeholder="Type your answer here... (Ctrl/Cmd + Enter to submit)"
+                placeholder="Answer in 3-5 sentences... (Ctrl/Cmd + Enter to submit)"
                 rows={4}
                 disabled={isLoading || isProcessingAnswer}
                 autoFocus
@@ -270,7 +386,7 @@ export default function ChatInterface({ sessionId, onClose, buildQuery, onBuildQ
                 onClick={handleSubmitAnswer}
                 disabled={isLoading || isProcessingAnswer || !inputText.trim()}
               >
-                {isLoading || isProcessingAnswer ? 'Processing...' : 'Submit Answer →'}
+                {isLoading || isProcessingAnswer ? 'Checking...' : 'Submit →'}
               </button>
               </div>
             </div>
@@ -278,10 +394,10 @@ export default function ChatInterface({ sessionId, onClose, buildQuery, onBuildQ
         )}
         
         {/* All questions answered */}
-        {!currentQuestion && totalQuestions > 0 && (
+        {(allDone || (!activeQuestion && answeredCount > 0)) && (
           <div className="chat-complete">
-            <p>✓ All {totalQuestions} questions answered!</p>
-            <p className="chat-complete-subtitle">You can now proceed to build the query and generate responses.</p>
+            <p>✓ All critical questions answered!</p>
+            <p className="chat-complete-subtitle">Ready to generate responses.</p>
           </div>
         )}
         

@@ -25,6 +25,8 @@ from backend.agents.question_agent import (
     analyze_build_query_for_questions,
     analyze_build_query_for_questions_legacy,
     infer_answered_questions_from_answer,
+    get_next_critical_question,
+    check_if_more_questions_needed,
 )
 from backend.agents.quality_agent import assess_response_quality
 from backend.rag import RAGSystem
@@ -272,66 +274,90 @@ async def index() -> HTMLResponse:
     return HTMLResponse(index_path.read_text(encoding="utf-8"))
 
 
+SUPPORTED_FILE_TYPES = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".txt"}
+
+
 @app.post("/process-rfp")
-async def process_rfp(file: UploadFile = File(...)) -> Dict[str, Any]:
+async def process_rfp(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
     request_id = str(uuid.uuid4())
-    logger.info("REQUEST %s: /process-rfp file=%s", request_id, file.filename)
+    file_names = [f.filename for f in files]
+    logger.info("REQUEST %s: /process-rfp files=%s", request_id, file_names)
 
-    suffix = Path(file.filename).suffix.lower()
-    if suffix not in {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".txt"}:
-        logger.warning("REQUEST %s: unsupported file type %s", request_id, suffix)
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Unsupported file type. Please upload one of: "
-                "PDF, DOCX, DOC, XLSX, XLS, or TXT."
-            ),
-        )
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded.")
 
-    temp_path = Path("/tmp") / f"{request_id}_{file.filename}"
-    bytes_written = 0
-    try:
-        with open(temp_path, "wb") as f:
-            while True:
-                chunk = await file.read(2 * 1024 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-                bytes_written += len(chunk)
-        logger.info(
-            "REQUEST %s: streamed upload to temp file %s (%d bytes)",
-            request_id,
-            temp_path,
-            bytes_written,
-        )
-    except Exception as e:
-        logger.exception("REQUEST %s: failed to write uploaded file to disk: %s", request_id, e)
-        raise HTTPException(status_code=500, detail="Failed to process uploaded file.") from e
-
-    t0 = time.time()
-    try:
-        text = extract_text_from_file(temp_path)
-        logger.info(
-            "REQUEST %s: extracted %d characters of text", request_id, len(text)
-        )
-    finally:
-        try:
-            temp_path.unlink(missing_ok=True)
-            logger.debug("REQUEST %s: removed temp file %s", request_id, temp_path)
-        except Exception:
-            logger.exception(
-                "REQUEST %s: failed to remove temp file %s", request_id, temp_path
+    # Validate all file types first
+    for file in files:
+        suffix = Path(file.filename).suffix.lower()
+        if suffix not in SUPPORTED_FILE_TYPES:
+            logger.warning("REQUEST %s: unsupported file type %s in file %s", request_id, suffix, file.filename)
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unsupported file type '{suffix}' for file '{file.filename}'. "
+                    f"Please upload: PDF, DOCX, DOC, XLSX, XLS, or TXT."
+                ),
             )
 
-        logger.info(
-            "REQUEST %s: OCR extracted %d characters of text from document",
-            request_id,
-            len(text),
-        )
+    t0 = time.time()
+    all_text_parts: List[str] = []
+    temp_paths: List[Path] = []
+
+    # Process each file
+    for file_index, file in enumerate(files, 1):
+        temp_path = Path("/tmp") / f"{request_id}_{file_index}_{file.filename}"
+        temp_paths.append(temp_path)
+        bytes_written = 0
+
+        try:
+            with open(temp_path, "wb") as f:
+                while True:
+                    chunk = await file.read(2 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    bytes_written += len(chunk)
+            logger.info(
+                "REQUEST %s: uploaded file %d/%d: %s (%d bytes)",
+                request_id, file_index, len(files), file.filename, bytes_written,
+            )
+        except Exception as e:
+            logger.exception("REQUEST %s: failed to write file to disk: %s", request_id, e)
+            for tp in temp_paths:
+                try:
+                    tp.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            raise HTTPException(status_code=500, detail="Failed to process uploaded file.") from e
+
+        try:
+            file_text = extract_text_from_file(temp_path)
+            logger.info(
+                "REQUEST %s: extracted %d chars from file %d/%d (%s)",
+                request_id, len(file_text), file_index, len(files), file.filename,
+            )
+            if file_text.strip():
+                # Add file marker if multiple files
+                if len(files) > 1:
+                    all_text_parts.append(f"\n{'='*60}\nFILE: {file.filename}\n{'='*60}\n\n{file_text}")
+                else:
+                    all_text_parts.append(file_text)
+        except Exception as e:
+            logger.exception("REQUEST %s: failed to extract text from %s: %s", request_id, file.filename, e)
+
+    # Clean up temp files
+    for temp_path in temp_paths:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    text = "\n\n".join(all_text_parts)
+    logger.info("REQUEST %s: combined text from %d file(s): %d chars", request_id, len(files), len(text))
 
     if not text.strip():
-        logger.warning("REQUEST %s: no text extracted from file", request_id)
-        raise HTTPException(status_code=400, detail="No text could be extracted from file.")
+        logger.warning("REQUEST %s: no text extracted from files", request_id)
+        raise HTTPException(status_code=400, detail="No text could be extracted from the uploaded files.")
 
     try:
         preprocess_res = run_preprocess_agent(text)
@@ -1135,7 +1161,7 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
                     build_query_obj,
                     requirements_result,
                     company_kb,
-                    max_questions_per_requirement=3,
+                    max_questions_per_requirement=1,  # Only critical questions
                     rag_system=rag_system,
                 )
                 enriched_build_query = _enrich_build_query_with_rag(
@@ -1186,7 +1212,7 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
             questions_dict = analyze_requirements_for_questions(
                 requirements_result.solution_requirements,
                 company_kb,
-                max_questions_per_requirement=3,
+                max_questions_per_requirement=1,  # Only critical questions
                 rag_system=rag_system,
             )
             
@@ -1223,6 +1249,162 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
             status_code=500,
             detail="Generate questions failed. Check server logs.",
         ) from exc
+
+
+# =============================================================================
+# ITERATIVE QUESTION FLOW - One question at a time
+# =============================================================================
+
+class GetNextQuestionRequest(BaseModel):
+    requirements: Dict[str, Any]
+    session_id: Optional[str] = None
+
+
+@app.post("/get-next-question")
+async def get_next_question_endpoint(req: GetNextQuestionRequest) -> Dict[str, Any]:
+    """
+    Get the next single critical question to ask (iterative flow).
+    
+    1. Searches RAG for existing info on all requirements
+    2. Considers previous answers from session
+    3. Returns ONE critical question (or null if none needed)
+    """
+    logger.info("Get next question (session=%s)", req.session_id)
+    
+    try:
+        company_kb = get_company_kb()
+        rag_system, _ = _setup_rag_and_kb(use_rag=True)
+        requirements_result = RequirementsResult(**req.requirements)
+        
+        # Get previous answers from session
+        previous_answers: List[Answer] = []
+        if req.session_id and req.session_id in _conversation_sessions:
+            context = _conversation_sessions[req.session_id]
+            previous_answers = context.answers
+            logger.info("Session has %d previous answers", len(previous_answers))
+        
+        question, remaining_gaps = get_next_critical_question(
+            requirements_result=requirements_result,
+            company_kb=company_kb,
+            rag_system=rag_system,
+            previous_answers=previous_answers,
+        )
+        
+        if question is None:
+            return {
+                "question": None,
+                "has_more_questions": False,
+                "remaining_gaps": 0,
+                "message": "All critical information is available. Ready to generate response.",
+            }
+        
+        # Create question ID
+        req_id = question.get("requirement_id", "general")
+        question_count = len(previous_answers)
+        question["question_id"] = f"{req_id}-q-{question_count}"
+        question["priority"] = "high"
+        
+        return {
+            "question": question,
+            "has_more_questions": remaining_gaps > 0,
+            "remaining_gaps": remaining_gaps,
+            "message": f"Please answer this question (3-5 sentences). {remaining_gaps} more question(s) may follow.",
+        }
+        
+    except Exception as exc:
+        logger.exception("Get next question failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to get next question.") from exc
+
+
+class SubmitIterativeAnswerRequest(BaseModel):
+    session_id: str
+    question_id: str
+    question_text: str
+    answer_text: str
+    requirements: Dict[str, Any]
+
+
+@app.post("/submit-answer-get-next")
+async def submit_answer_and_get_next(req: SubmitIterativeAnswerRequest) -> Dict[str, Any]:
+    """
+    Submit an answer and immediately get the next question (if any).
+    
+    Combines answer submission with checking for remaining gaps.
+    """
+    logger.info("Submit answer for %s and get next", req.question_id)
+    
+    if req.session_id not in _conversation_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    context = _conversation_sessions[req.session_id]
+    
+    # Save the answer
+    answer = Answer(
+        question_id=req.question_id,
+        question_text=req.question_text,
+        answer_text=req.answer_text,
+        answered_at=datetime.now().isoformat(),
+    )
+    context.answers.append(answer)
+    logger.info("Saved answer for %s (total answers: %d)", req.question_id, len(context.answers))
+    
+    # Check if more questions needed
+    try:
+        company_kb = get_company_kb()
+        rag_system, _ = _setup_rag_and_kb(use_rag=True)
+        requirements_result = RequirementsResult(**req.requirements)
+        
+        needs_more, next_question, remaining = check_if_more_questions_needed(
+            requirements_result=requirements_result,
+            company_kb=company_kb,
+            rag_system=rag_system,
+            all_answers=context.answers,
+        )
+        
+        if not needs_more or next_question is None:
+            return {
+                "answer_saved": True,
+                "next_question": None,
+                "has_more_questions": False,
+                "remaining_gaps": 0,
+                "message": "All critical information gathered. Ready to generate response.",
+            }
+        
+        # Create question ID for next question
+        req_id = next_question.get("requirement_id", "general")
+        next_question["question_id"] = f"{req_id}-q-{len(context.answers)}"
+        next_question["priority"] = "high"
+        
+        # Add to session
+        q_obj = Question(
+            question_id=next_question["question_id"],
+            requirement_id=next_question.get("requirement_id"),
+            question_text=next_question["question_text"],
+            context=next_question.get("context", ""),
+            category=next_question.get("category", "general"),
+            priority="high",
+            asked_at=datetime.now().isoformat(),
+        )
+        context.questions.append(q_obj)
+        
+        return {
+            "answer_saved": True,
+            "next_question": next_question,
+            "has_more_questions": remaining > 0,
+            "remaining_gaps": remaining,
+            "message": f"Answer saved. Next critical question (3-5 sentences please).",
+        }
+        
+    except Exception as exc:
+        logger.exception("Failed to get next question: %s", exc)
+        return {
+            "answer_saved": True,
+            "next_question": None,
+            "has_more_questions": False,
+            "remaining_gaps": 0,
+            "message": "Answer saved. Could not determine next question.",
+            "error": str(exc),
+        }
 
 
 class CreateSessionRequest(BaseModel):
