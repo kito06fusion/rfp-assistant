@@ -42,6 +42,7 @@ from backend.models import (
 )
 from backend.knowledge_base import FusionAIxKnowledgeBase
 from backend.knowledge_base.company_kb import CompanyKnowledgeBase
+from backend.memory.mem0_client import store_preprocess_result
 
 
 def _setup_rag_and_kb(use_rag: bool) -> tuple[Optional[RAGSystem], FusionAIxKnowledgeBase]:
@@ -58,39 +59,25 @@ def _setup_rag_and_kb(use_rag: bool) -> tuple[Optional[RAGSystem], FusionAIxKnow
                 query_cache_path=str(query_cache_path),
             )
             try:
-                rag_system.load_index()
+                # Ensure we have an index, and only rebuild/push when docs changed
+                rag_system.ensure_index_up_to_date()
                 stats = rag_system.get_stats()
                 logger.info(
-                    "RAG loaded existing index successfully | built=%s, docs=%s, vectors=%s, dim=%s, model=%s",
+                    "RAG index ready | built=%s, docs=%s, vectors=%s, dim=%s, model=%s",
                     stats.get("index_built"),
                     stats.get("num_documents"),
                     stats.get("num_vectors"),
                     stats.get("embedding_dimension"),
                     stats.get("embedding_model"),
                 )
-            except FileNotFoundError:
-                logger.info(
-                    "RAG index not found. Attempting to build index from docs folder '%s'...",
-                    "docs",
+            except ValueError as build_err:
+                logger.warning(
+                    "Failed to build RAG index: %s. RAG system not available. "
+                    "Make sure you have documents (PDF, DOCX, TXT) in the 'docs' folder. "
+                    "Continuing without RAG.",
+                    str(build_err)
                 )
-                try:
-                    rag_system.build_index()
-                    stats = rag_system.get_stats()
-                    logger.info(
-                        "RAG index built successfully from docs/ | docs=%s, vectors=%s, dim=%s, model=%s",
-                        stats.get("num_documents"),
-                        stats.get("num_vectors"),
-                        stats.get("embedding_dimension"),
-                        stats.get("embedding_model"),
-                    )
-                except ValueError as build_err:
-                    logger.warning(
-                        "Failed to build RAG index: %s. RAG system not available. "
-                        "Make sure you have documents (PDF, DOCX, TXT) in the 'docs' folder. "
-                        "Continuing without RAG.",
-                        str(build_err)
-                    )
-                    rag_system = None
+                rag_system = None
         except Exception as rag_exc:
             logger.warning("Failed to load/build RAG system: %s. Continuing without RAG.", rag_exc)
             rag_system = None
@@ -382,6 +369,19 @@ async def process_rfp(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
         preprocess_res.comparison_agreement,
     )
     logger.info("REQUEST %s: OCR + preprocess completed in %.2fs", request_id, elapsed)
+    
+    # Store preprocess result in Mem0 using SHA-256 hash of OCR text as user_id
+    try:
+        preprocess_dict = preprocess_res.to_dict()
+        store_success = store_preprocess_result(text, preprocess_dict)
+        if store_success:
+            logger.info("REQUEST %s: Preprocess result stored in Mem0", request_id)
+        else:
+            logger.debug("REQUEST %s: Mem0 storage skipped (client not available or error)", request_id)
+    except Exception as e:
+        # Don't fail the request if Mem0 storage fails
+        logger.warning("REQUEST %s: Failed to store preprocess result in Mem0: %s", request_id, str(e))
+    
     response: Dict[str, Any] = {
         "preprocess": preprocess_res.to_dict(),
         "requirements": None,
@@ -1276,19 +1276,30 @@ async def get_next_question_endpoint(req: GetNextQuestionRequest) -> Dict[str, A
         rag_system, _ = _setup_rag_and_kb(use_rag=True)
         requirements_result = RequirementsResult(**req.requirements)
         
-        # Get previous answers from session
+        # Get previous answers and cached RAG from session
         previous_answers: List[Answer] = []
+        rag_contexts_by_req: Dict[str, str] = {}
         if req.session_id and req.session_id in _conversation_sessions:
             context = _conversation_sessions[req.session_id]
             previous_answers = context.answers
-            logger.info("Session has %d previous answers", len(previous_answers))
+            rag_contexts_by_req = context.rag_contexts_by_req or {}
+            logger.info(
+                "Session has %d previous answers and %d cached RAG contexts",
+                len(previous_answers),
+                len(rag_contexts_by_req),
+            )
         
-        question, remaining_gaps = get_next_critical_question(
+        question, remaining_gaps, updated_rag = get_next_critical_question(
             requirements_result=requirements_result,
             company_kb=company_kb,
             rag_system=rag_system,
             previous_answers=previous_answers,
+            rag_contexts_by_req=rag_contexts_by_req,
         )
+        
+        # Persist updated RAG cache back into session
+        if req.session_id and req.session_id in _conversation_sessions:
+            _conversation_sessions[req.session_id].rag_contexts_by_req = updated_rag
         
         if question is None:
             return {
@@ -1353,13 +1364,18 @@ async def submit_answer_and_get_next(req: SubmitIterativeAnswerRequest) -> Dict[
         company_kb = get_company_kb()
         rag_system, _ = _setup_rag_and_kb(use_rag=True)
         requirements_result = RequirementsResult(**req.requirements)
+        rag_contexts_by_req = context.rag_contexts_by_req or {}
         
-        needs_more, next_question, remaining = check_if_more_questions_needed(
+        needs_more, next_question, remaining, updated_rag = check_if_more_questions_needed(
             requirements_result=requirements_result,
             company_kb=company_kb,
             rag_system=rag_system,
             all_answers=context.answers,
+            rag_contexts_by_req=rag_contexts_by_req,
         )
+        
+        # Persist updated RAG cache
+        context.rag_contexts_by_req = updated_rag
         
         if not needs_more or next_question is None:
             return {
