@@ -130,6 +130,10 @@ class ConversationContext(BaseModel):
     requirement_id: Optional[str] = Field(default=None, description="Current requirement being processed")
     questions: List[Question] = Field(default_factory=list, description="List of questions")
     answers: List[Answer] = Field(default_factory=list, description="List of answers")
+    rag_contexts_by_req: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Cached RAG context per requirement ID to avoid repeated RAG lookups",
+    )
     created_at: Optional[str] = Field(default=None, description="Session creation timestamp")
     
     def get_answer_for_question(self, question_id: str) -> Optional[str]:

@@ -14,35 +14,35 @@ from backend.agents.prompts import QUESTION_SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 QUESTION_MODEL = "gpt-5-chat"
 
+# Maximum number of critical questions to ask
+MAX_CRITICAL_QUESTIONS = 5
 
-# =============================================================================
-# ITERATIVE QUESTION FLOW - One question at a time
-# =============================================================================
 
 def get_next_critical_question(
     requirements_result: RequirementsResult,
     company_kb: CompanyKnowledgeBase,
     rag_system: Optional[RAGSystem],
     previous_answers: List[Answer],
-) -> Tuple[Optional[Dict[str, Any]], int]:
-    """
-    Get the next single critical question to ask.
+    rag_contexts_by_req: Dict[str, str],
+    max_questions: int = MAX_CRITICAL_QUESTIONS,
+) -> Tuple[Optional[Dict[str, Any]], int, Dict[str, str]]:
+    logger.info(
+        "Getting next critical question (previous_answers=%d, cached_rag=%d, max=%d)",
+        len(previous_answers),
+        len(rag_contexts_by_req),
+        max_questions,
+    )
     
-    Flow:
-    1. For each requirement, search RAG for existing info
-    2. Identify what critical info is still missing (considering previous answers)
-    3. Return ONE question for the most critical gap
-    4. Returns (None, 0) when no more critical questions needed
-    
-    Returns:
-        - question dict (or None if no more questions)
-        - remaining_gaps_count
-    """
-    logger.info("Getting next critical question (previous_answers=%d)", len(previous_answers))
+    # Stop if we've already asked the maximum number of questions
+    if len(previous_answers) >= max_questions:
+        logger.info(
+            "Maximum number of critical questions (%d) already reached. No more questions will be asked.",
+            max_questions,
+        )
+        return None, 0, rag_contexts_by_req
     
     known_info = company_kb.format_for_prompt()
     
-    # Build context from previous answers
     answers_context = ""
     if previous_answers:
         answers_context = "\n".join([
@@ -50,25 +50,32 @@ def get_next_critical_question(
             for a in previous_answers
         ])
     
-    # Gather RAG context for all requirements
     all_requirements_with_rag = []
     for req in requirements_result.solution_requirements:
-        rag_ctx = _build_rag_context_for_requirement(req, rag_system, max_chunks=3)
-        all_requirements_with_rag.append({
-            "id": req.id,
-            "text": req.source_text,
-            "type": req.type,
-            "rag_context": rag_ctx or "[No RAG info]",
-        })
+        rag_ctx = rag_contexts_by_req.get(req.id)
+        if rag_ctx is None and rag_system is not None:
+            rag_ctx = _build_rag_context_for_requirement(req, rag_system, max_chunks=3)
+            rag_contexts_by_req[req.id] = rag_ctx or "[No RAG info]"
+        all_requirements_with_rag.append(
+            {
+                "id": req.id,
+                "text": req.source_text,
+                "type": req.type,
+                "rag_context": rag_ctx or "[No RAG info]",
+            }
+        )
     
     requirements_text = "\n\n".join([
         f"REQUIREMENT {r['id']}:\n{r['text']}\n\nRAG INFO FOR {r['id']}:\n{r['rag_context']}"
         for r in all_requirements_with_rag
     ])
     
-    user_prompt = f"""Analyze these RFP requirements and identify if there's any CRITICAL information missing that the vendor MUST provide.
+    questions_asked = len(previous_answers)
+    questions_remaining = max_questions - questions_asked
+    
+    user_prompt = f"""You are helping a vendor respond to an RFP. Your job is to identify what information the vendor should provide to create a high-quality response.
 
-KNOWN COMPANY INFO (available):
+KNOWN COMPANY INFO (already available):
 {known_info[:2000]}
 
 PREVIOUS Q&A (info already gathered):
@@ -77,50 +84,61 @@ PREVIOUS Q&A (info already gathered):
 REQUIREMENTS WITH RAG CONTEXT:
 {requirements_text[:6000]}
 
-TASK:
-1. For each requirement, check if RAG context + known info + previous answers provide enough to write a credible response
-2. Identify ONLY gaps where missing info would make the response WRONG or IMPOSSIBLE
-3. Return the SINGLE most critical question (if any)
+IMPORTANT LIMIT: You have already asked {questions_asked} question(s). Maximum is {max_questions} questions total.
+You have {questions_remaining} question(s) remaining. Only ask if the information is TRULY CRITICAL.
 
-RULES FOR QUESTIONS:
-- Question must be CONCISE - answerable in 3-5 sentences
-- Ask about ONE specific thing, not multiple items
-- Don't ask about info that's in RAG context or previous answers
-- Don't ask generic questions - be specific to what's missing
-- If a reasonable default answer would work, DON'T ask
+TASK:
+1. Review each requirement and check what information is available from RAG + known info + previous answers
+2. Identify what information is MISSING that the vendor should provide
+3. Return the SINGLE most important question to ask next (ONLY if you have questions remaining)
+
+WHAT TO ASK ABOUT:
+- Vendor-specific details: team structure, team size, specific timelines, resourcing numbers
+- Specific capabilities or features relevant to the requirement
+- Case studies, previous projects, or references if relevant
+- Technical specifications or implementation details if the requirement asks for them
+- Any information that would make the response more accurate, credible, or tailored
+
+WHAT NOT TO ASK ABOUT:
+- Information that's clearly stated in the RAG context above
+- Information already provided in previous answers
+- Generic capabilities that can be assumed
+
+QUESTION FORMAT:
+- Must be CONCISE - answerable in 3-5 sentences
+- Ask about ONE specific thing
+- Be clear and direct
 
 OUTPUT FORMAT - Return JSON:
 {{
   "has_critical_gap": true/false,
   "question": {{
     "question_text": "Concise, specific question (answerable in 3-5 sentences)",
-    "context": "Brief reason why this is critical",
+    "context": "Why this information is important for the response",
     "requirement_id": "REQ-XX",
     "category": "resources/timeline/technical/etc"
   }},
-  "remaining_gaps": 0-N (estimate of other gaps after this one)
+  "remaining_gaps": 0-N (rough estimate of other gaps)
 }}
 
-If NO critical gaps exist, return:
-{{
-  "has_critical_gap": false,
-  "question": null,
-  "remaining_gaps": 0
-}}
+IMPORTANT: 
+- If you have reached the maximum of {max_questions} questions, set has_critical_gap: false
+- Only return true if the question is TRULY CRITICAL and you have questions remaining
+- If there's ANY information that would improve the response quality AND you have questions remaining, set has_critical_gap: true
+- Only return false if you're confident ALL requirements can be answered well with existing information OR you've reached the question limit
 """
 
     try:
         response = chat_completion(
             model=QUESTION_MODEL,
             messages=[
-                {"role": "system", "content": "You identify critical information gaps in RFP requirements. Be very selective - only truly critical gaps. Keep questions concise."},
+                {"role": "system", "content": "You identify important information gaps in RFP requirements. Ask questions that would improve response quality. Keep questions concise (3-5 sentences). Ask one at a time."},
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.0,
             max_tokens=800,
         )
         
-        # Parse response
         cleaned = response.strip()
         if cleaned.startswith("```json"):
             cleaned = cleaned[7:]
@@ -132,9 +150,15 @@ If NO critical gaps exist, return:
         
         result = json.loads(cleaned)
         
+        logger.info(
+            "Question generation result: has_gap=%s, question=%s",
+            result.get("has_critical_gap"),
+            "present" if result.get("question") else "missing",
+        )
+        
         if not result.get("has_critical_gap", False) or not result.get("question"):
-            logger.info("No more critical questions needed")
-            return None, 0
+            logger.info("No more questions needed - LLM determined all info is available")
+            return None, 0, rag_contexts_by_req
         
         question = result["question"]
         question["priority"] = "high"
@@ -147,14 +171,14 @@ If NO critical gaps exist, return:
             remaining,
         )
         
-        return question, remaining
+        return question, remaining, rag_contexts_by_req
         
     except json.JSONDecodeError as e:
         logger.error("Failed to parse critical question response: %s", e)
-        return None, 0
+        return None, 0, rag_contexts_by_req
     except Exception as e:
         logger.error("Critical question generation failed: %s", e)
-        return None, 0
+        return None, 0, rag_contexts_by_req
 
 
 def check_if_more_questions_needed(
@@ -162,31 +186,20 @@ def check_if_more_questions_needed(
     company_kb: CompanyKnowledgeBase,
     rag_system: Optional[RAGSystem],
     all_answers: List[Answer],
-) -> Tuple[bool, Optional[Dict[str, Any]], int]:
-    """
-    After an answer is received, check if more questions are needed.
-    
-    Returns:
-        - needs_more: bool
-        - next_question: dict or None
-        - remaining_gaps: int
-    """
-    question, remaining = get_next_critical_question(
+    rag_contexts_by_req: Dict[str, str],
+) -> Tuple[bool, Optional[Dict[str, Any]], int, Dict[str, str]]:
+    question, remaining, rag_contexts_by_req = get_next_critical_question(
         requirements_result=requirements_result,
         company_kb=company_kb,
         rag_system=rag_system,
         previous_answers=all_answers,
+        rag_contexts_by_req=rag_contexts_by_req,
     )
     
     if question is None:
-        return False, None, 0
+        return False, None, 0, rag_contexts_by_req
     
-    return True, question, remaining
-
-
-# =============================================================================
-# ORIGINAL FUNCTIONS
-# =============================================================================
+    return True, question, remaining, rag_contexts_by_req
 
 
 def _build_rag_context_for_requirement(
@@ -386,7 +399,7 @@ def analyze_build_query_for_questions(
     build_query: BuildQuery,
     requirements_result: RequirementsResult,
     company_kb: CompanyKnowledgeBase,
-    max_questions_per_requirement: int = 1,  # Reduced: only 1 critical question per requirement max
+    max_questions_per_requirement: int = 1,
     rag_system: Optional[RAGSystem] = None,
 ) -> tuple[List[Dict[str, Any]], Dict[str, str]]:
     logger.info("Analyzing requirements individually for information gaps")
@@ -548,8 +561,6 @@ Return an EMPTY ARRAY [] if:
         q.get("requirement_id", ""),
     ))
     
-    # CRITICAL: Only keep HIGH priority questions - skip medium/low
-    # This drastically reduces question count to only truly essential ones
     critical_questions = [q for q in filtered_questions if q.get("priority") == "high"]
     
     logger.info(
@@ -560,9 +571,12 @@ Return an EMPTY ARRAY [] if:
         len(critical_questions),
     )
     
-    # If we have too many critical questions, consolidate to most important ones
-    if len(critical_questions) > 5:
-        critical_questions = _consolidate_critical_questions(critical_questions, company_kb)
+    # Enforce maximum of 5 critical questions
+    if len(critical_questions) > MAX_CRITICAL_QUESTIONS:
+        critical_questions = _consolidate_critical_questions(critical_questions, company_kb, max_questions=MAX_CRITICAL_QUESTIONS)
+    
+    # Ensure we never return more than 5
+    critical_questions = critical_questions[:MAX_CRITICAL_QUESTIONS]
     
     return critical_questions, rag_contexts_by_req
 
@@ -570,12 +584,8 @@ Return an EMPTY ARRAY [] if:
 def _consolidate_critical_questions(
     questions: List[Dict[str, Any]],
     company_kb: CompanyKnowledgeBase,
-    max_questions: int = 5,
+    max_questions: int = MAX_CRITICAL_QUESTIONS,
 ) -> List[Dict[str, Any]]:
-    """
-    Use LLM to consolidate/dedupe questions and keep only the most critical ones.
-    This reduces question overload when many high-priority questions are generated.
-    """
     if len(questions) <= max_questions:
         return questions
     
@@ -619,7 +629,6 @@ Only output the JSON array, nothing else.
         selected_indices = json.loads(cleaned)
         
         if isinstance(selected_indices, list):
-            # Convert 1-indexed to 0-indexed and filter
             result = []
             for idx in selected_indices[:max_questions]:
                 if isinstance(idx, int) and 1 <= idx <= len(questions):
