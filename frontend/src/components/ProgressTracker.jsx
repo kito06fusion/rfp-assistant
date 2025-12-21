@@ -90,7 +90,7 @@ export default function ProgressTracker() {
             >
               <div className="step-indicator">
                 {stepStatus === 'complete' && <span className="step-check">✓</span>}
-                {stepStatus === 'processing' && <span className="step-spinner">⟳</span>}
+                {stepStatus === 'processing' && <span className="step-spinner"></span>}
                 {stepStatus === 'error' && <span className="step-error">✗</span>}
                 {stepStatus === 'blocked' && <span className="step-blocked">⊘</span>}
                 {(stepStatus === 'waiting' && !isActive) && <span className="step-number">{step.order}</span>}
