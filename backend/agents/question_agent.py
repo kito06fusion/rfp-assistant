@@ -44,11 +44,17 @@ def get_next_critical_question(
     known_info = company_kb.format_for_prompt()
     
     answers_context = ""
+    skipped_topics = []
     if previous_answers:
-        answers_context = "\n".join([
-            f"Q: {a.question_text}\nA: {a.answer_text}"
-            for a in previous_answers
-        ])
+        answer_lines = []
+        for a in previous_answers:
+            if not a.answer_text or a.answer_text.strip() == "":
+                # Empty answer means topic was intentionally skipped
+                answer_lines.append(f"Q: {a.question_text}\nA: [SKIPPED - Topic intentionally skipped, do NOT ask about this topic again]")
+                skipped_topics.append(a.question_text.lower())
+            else:
+                answer_lines.append(f"Q: {a.question_text}\nA: {a.answer_text}")
+        answers_context = "\n".join(answer_lines)
     
     all_requirements_with_rag = []
     for req in requirements_result.solution_requirements:
@@ -80,6 +86,8 @@ KNOWN COMPANY INFO (already available):
 
 PREVIOUS Q&A (info already gathered):
 {answers_context or "[No previous answers yet]"}
+
+IMPORTANT: If an answer shows "[SKIPPED]", that means the vendor intentionally skipped that topic. DO NOT ask about that topic again, even if phrased differently. Treat skipped topics as "covered" - the vendor has indicated they don't want to provide information on that topic.
 
 REQUIREMENTS WITH RAG CONTEXT:
 {requirements_text[:6000]}
@@ -161,6 +169,20 @@ IMPORTANT:
             return None, 0, rag_contexts_by_req
         
         question = result["question"]
+        question_text_lower = question.get("question_text", "").lower()
+        
+        # Check if this question is about a topic that was previously skipped
+        for skipped_q in skipped_topics:
+            # Simple check: if key words from skipped question appear in new question, skip it
+            skipped_words = [w for w in skipped_q.split() if len(w) > 4]
+            if skipped_words and any(word in question_text_lower for word in skipped_words):
+                logger.info(
+                    "Skipping question about previously skipped topic: %s (skipped: %s)",
+                    question.get("question_text", "")[:60],
+                    skipped_q[:60],
+                )
+                return None, 0, rag_contexts_by_req
+        
         question["priority"] = "high"
         remaining = result.get("remaining_gaps", 0)
         

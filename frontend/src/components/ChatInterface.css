@@ -193,6 +193,12 @@
   gap: 0.75rem;
 }
 
+.button-group {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
 .answer-input {
   background: #020617;
   border: 1px solid rgba(148, 163, 184, 0.3);
@@ -232,6 +238,30 @@
 }
 
 .submit-answer-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.skip-question-btn {
+  background: rgba(107, 114, 128, 0.2);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #9ca3af;
+  padding: 0.6rem 1.2rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+  align-self: flex-start;
+}
+
+.skip-question-btn:hover:not(:disabled) {
+  background: rgba(107, 114, 128, 0.3);
+  border-color: rgba(148, 163, 184, 0.5);
+  color: #d1d5db;
+}
+
+.skip-question-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

@@ -120,6 +120,99 @@ export default function ChatInterface({
     }
   }
 
+  // Handle skip question (send empty string)
+  const handleSkipQuestion = async () => {
+    if (isLoading || isProcessingAnswer) return
+
+    const questionToSkip = iterativeMode ? currentQuestion : allQuestions[currentQuestionIndex]
+    if (!questionToSkip) return
+
+    setIsLoading(true)
+    setIsProcessingAnswer(true)
+    try {
+      if (iterativeMode) {
+        const result = await submitAnswerAndGetNext(
+          sessionId,
+          questionToSkip.question_id,
+          questionToSkip.question_text,
+          "", // Empty string for skipped question
+          requirements
+        )
+        console.log('Skip result:', result)
+        
+        // Add to conversation with skipped indicator
+        setConversation(prev => [...prev, {
+          question: questionToSkip,
+          answer: { answer_text: "[Skipped]" },
+          index: prev.length,
+        }])
+        
+        if (result.next_question) {
+          setCurrentQuestion(result.next_question)
+          setRemainingGaps(result.remaining_gaps || 0)
+          setAllQuestions(prev => [...prev, result.next_question])
+        } else {
+          setCurrentQuestion(null)
+          setAllDone(true)
+          setRemainingGaps(0)
+          if (onAllAnswered) onAllAnswered()
+        }
+      } else {
+        const response = await fetch(`${API_BASE}/chat/answer`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            session_id: sessionId,
+            question_id: questionToSkip.question_id,
+            answer_text: "", // Empty string for skipped question
+          }),
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          
+          // Add to conversation history with skipped indicator
+          setConversation(prev => [
+            ...prev,
+            {
+              question: questionToSkip,
+              answer: { answer_text: "[Skipped]" },
+              index: currentQuestionIndex,
+            },
+          ])
+          
+          // Move to next question
+          const nextIndex = currentQuestionIndex + 1
+          setCurrentQuestionIndex(nextIndex)
+          
+          // Reload session to get updated state
+          await loadSession()
+        } else {
+          const errorText = await response.text()
+          alert(`Failed to skip question: ${errorText}`)
+        }
+      }
+      
+      // Enrich build query
+      if (buildQuery && onBuildQueryUpdated) {
+        try {
+          const updated = await enrichBuildQuery(buildQuery, sessionId)
+          onBuildQueryUpdated(updated)
+        } catch (e) {
+          console.error('Failed to enrich build query:', e)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to skip question:', err)
+      alert('Failed to skip question. Please try again.')
+    } finally {
+      setIsLoading(false)
+      setIsProcessingAnswer(false)
+    }
+  }
+
   // Iterative mode: submit and get next question
   const handleIterativeSubmit = async () => {
     if (!inputText.trim() || isLoading || isProcessingAnswer || !currentQuestion) return
@@ -381,13 +474,22 @@ export default function ChatInterface({
                 disabled={isLoading || isProcessingAnswer}
                 autoFocus
               />
-              <button
-                className="submit-answer-btn"
-                onClick={handleSubmitAnswer}
-                disabled={isLoading || isProcessingAnswer || !inputText.trim()}
-              >
-                {isLoading || isProcessingAnswer ? 'Checking...' : 'Submit →'}
-              </button>
+              <div className="button-group">
+                <button
+                  className="skip-question-btn"
+                  onClick={handleSkipQuestion}
+                  disabled={isLoading || isProcessingAnswer}
+                >
+                  Skip
+                </button>
+                <button
+                  className="submit-answer-btn"
+                  onClick={handleSubmitAnswer}
+                  disabled={isLoading || isProcessingAnswer || !inputText.trim()}
+                >
+                  {isLoading || isProcessingAnswer ? 'Checking...' : 'Submit →'}
+                </button>
+              </div>
               </div>
             </div>
           </div>
