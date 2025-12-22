@@ -47,6 +47,17 @@ def render_mermaid_to_bytes(diagram: str, fmt: str = "png", timeout: int = 30) -
         in_path.write_text(diagram, encoding="utf-8")
 
         cmd = [mmdc, "-i", str(in_path), "-o", str(out_path)]
+
+        try:
+            euid = getattr(os, "geteuid", lambda: None)()
+        except Exception:
+            euid = None
+
+        force_no_sandbox = os.environ.get("MERMAID_CLI_NO_SANDBOX", "").lower() in ("1", "true", "yes")
+        if force_no_sandbox or (euid is not None and euid == 0):
+            logger.info("Adding --no-sandbox flags for mmdc (root or MERMAID_CLI_NO_SANDBOX)")
+            cmd += ["--no-sandbox", "--disable-setuid-sandbox"]
+
         logger.debug("Running mmdc: %s", " ".join(cmd))
 
 

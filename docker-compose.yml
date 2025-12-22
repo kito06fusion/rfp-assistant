@@ -17,6 +17,7 @@ services:
       - AZURE_OPENAI_EMBEDDING_API_VERSION=${AZURE_OPENAI_EMBEDDING_API_VERSION:-2024-02-15-preview}
       - AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=${AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME:-text-embedding-3-large}
       - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING}
+      - MERMAID_CLI_NO_SANDBOX=1
     working_dir: /app
     command: uvicorn backend.app:app --host 0.0.0.0 --port 8001
     volumes:
