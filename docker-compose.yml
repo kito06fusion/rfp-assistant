@@ -22,6 +22,7 @@ services:
     volumes:
       - ./output:/app/output
       - ./docs:/app/docs
+      - ./backend/memory/data:/app/backend/memory/data
 
   frontend:
     build:

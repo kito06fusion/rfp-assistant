@@ -43,6 +43,9 @@ rag_index/
 rag_index.*
 rag_query_cache.pkl
 
+# Local memory store
+backend/memory/data/
+
 # Temporary
 *.tmp
 /tmp/

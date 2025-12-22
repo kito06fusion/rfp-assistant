@@ -3,30 +3,25 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
-try:
-    from mem0 import Memory  # type: ignore
-except ImportError:  # pragma: no cover - optional dependency
-    Memory = None  # type: ignore[misc, assignment]
 
-_MEM0_CLIENT: Optional["Memory"] = None
+DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+STORE_PATH = DATA_DIR / "memories.jsonl"
 
 
-def _get_mem0_client() -> Optional["Memory"]:
-    global _MEM0_CLIENT
-    if _MEM0_CLIENT is not None:
-        return _MEM0_CLIENT
-
+def _append_record(record: Dict[str, Any]) -> bool:
     try:
-        _MEM0_CLIENT = Memory()  # type: ignore[call-arg]
+        with STORE_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        return True
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.warning("Failed to initialize Mem0 client: %s", exc)
-        _MEM0_CLIENT = None
-    return _MEM0_CLIENT
+        logger.warning("Failed to write local memory record: %s", exc)
+        return False
 
 
 def _build_messages(preprocess_payload: Dict[str, Any]) -> list[Dict[str, str]]:
@@ -105,11 +100,7 @@ def _build_build_query_messages(build_query_payload: Dict[str, Any]) -> list[Dic
 
 def store_preprocess_result(source_text: str, preprocess_payload: Dict[str, Any]) -> bool:
     if not source_text:
-        logger.debug("No OCR text supplied; skipping Mem0 storage")
-        return False
-
-    client = _get_mem0_client()
-    if client is None:
+        logger.debug("Mem0: no OCR text supplied; skipping preprocess storage")
         return False
 
     try:
@@ -126,22 +117,23 @@ def store_preprocess_result(source_text: str, preprocess_payload: Dict[str, Any]
 
     messages = _build_messages(preprocess_payload)
 
-    try:
-        # Local Mem0 Memory.add; keeps all data on this machine
-        client.add(messages, user_id=user_hash, metadata=metadata)
-        return True
-    except Exception as exc:  # pragma: no cover - runtime safety
-        logger.warning("Mem0 write failed: %s", exc)
-        return False
+    record: Dict[str, Any] = {
+        "user_id": user_hash,
+        "stage": metadata["stage"],
+        "metadata": metadata,
+        "messages": messages,
+    }
+    ok = _append_record(record)
+    if ok:
+        logger.info("Mem0: stored preprocess record for user_id=%s at %s", user_hash[:12], STORE_PATH)
+    else:
+        logger.warning("Mem0: failed to store preprocess record for user_id=%s", user_hash[:12])
+    return ok
 
 
 def store_requirements_result(source_text: str, requirements_payload: Dict[str, Any]) -> bool:
     if not source_text:
-        logger.debug("No essential text supplied; skipping Mem0 requirements storage")
-        return False
-
-    client = _get_mem0_client()
-    if client is None:
+        logger.debug("Mem0: no essential text supplied; skipping requirements storage")
         return False
 
     try:
@@ -157,21 +149,23 @@ def store_requirements_result(source_text: str, requirements_payload: Dict[str, 
 
     messages = _build_requirements_messages(requirements_payload)
 
-    try:
-        client.add(messages, user_id=user_hash, metadata=metadata)
-        return True
-    except Exception as exc:
-        logger.warning("Mem0 requirements write failed: %s", exc)
-        return False
+    record: Dict[str, Any] = {
+        "user_id": user_hash,
+        "stage": metadata["stage"],
+        "metadata": metadata,
+        "messages": messages,
+    }
+    ok = _append_record(record)
+    if ok:
+        logger.info("Mem0: stored requirements record for user_id=%s at %s", user_hash[:12], STORE_PATH)
+    else:
+        logger.warning("Mem0: failed to store requirements record for user_id=%s", user_hash[:12])
+    return ok
 
 
 def store_build_query_result(source_text: str, build_query_payload: Dict[str, Any]) -> bool:
     if not source_text:
-        logger.debug("No essential text supplied; skipping Mem0 build query storage")
-        return False
-
-    client = _get_mem0_client()
-    if client is None:
+        logger.debug("Mem0: no essential text supplied; skipping build-query storage")
         return False
 
     try:
@@ -187,9 +181,15 @@ def store_build_query_result(source_text: str, build_query_payload: Dict[str, An
 
     messages = _build_build_query_messages(build_query_payload)
 
-    try:
-        client.add(messages, user_id=user_hash, metadata=metadata)
-        return True
-    except Exception as exc:
-        logger.warning("Mem0 build query write failed: %s", exc)
-        return False
+    record: Dict[str, Any] = {
+        "user_id": user_hash,
+        "stage": metadata["stage"],
+        "metadata": metadata,
+        "messages": messages,
+    }
+    ok = _append_record(record)
+    if ok:
+        logger.info("Mem0: stored build-query record for user_id=%s at %s", user_hash[:12], STORE_PATH)
+    else:
+        logger.warning("Mem0: failed to store build-query record for user_id=%s", user_hash[:12])
+    return ok
