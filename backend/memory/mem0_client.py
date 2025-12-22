@@ -10,40 +10,22 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-try:  # Import lazily so the backend still runs without mem0 installed
-    from mem0 import MemoryClient  # type: ignore
+try:
+    from mem0 import Memory  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
-    MemoryClient = None  # type: ignore[misc, assignment]
+    Memory = None  # type: ignore[misc, assignment]
 
-_MEM0_CLIENT: Optional[MemoryClient] = None
+_MEM0_CLIENT: Optional["Memory"] = None
 
 
-def _get_mem0_client() -> Optional[MemoryClient]:
-    """Return a singleton Mem0 client if credentials and SDK are available."""
+def _get_mem0_client() -> Optional["Memory"]:
 
     global _MEM0_CLIENT
     if _MEM0_CLIENT is not None:
         return _MEM0_CLIENT
 
-    if MemoryClient is None:
-        logger.debug("mem0 Python SDK not installed; skip Mem0 persistence")
-        return None
-
-    api_key = os.getenv("MEM0_API_KEY")
-    if not api_key:
-        logger.debug("MEM0_API_KEY not set; skip Mem0 persistence")
-        return None
-
-    client_kwargs: Dict[str, Any] = {"api_key": api_key}
-    org_id = os.getenv("MEM0_ORG_ID")
-    project_id = os.getenv("MEM0_PROJECT_ID")
-    if org_id:
-        client_kwargs["org_id"] = org_id
-    if project_id:
-        client_kwargs["project_id"] = project_id
-
     try:
-        _MEM0_CLIENT = MemoryClient(**client_kwargs)
+        _MEM0_CLIENT = Memory()  # type: ignore[call-arg]
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.warning("Failed to initialize Mem0 client: %s", exc)
         _MEM0_CLIENT = None
@@ -51,7 +33,6 @@ def _get_mem0_client() -> Optional[MemoryClient]:
 
 
 def _build_messages(preprocess_payload: Dict[str, Any]) -> list[Dict[str, str]]:
-    """Create the conversation payload sent to Mem0."""
 
     summary = preprocess_payload.get("key_requirements_summary") or "RFP preprocess summary"
     cleaned_text = preprocess_payload.get("cleaned_text") or ""
@@ -94,10 +75,10 @@ def store_preprocess_result(source_text: str, preprocess_payload: Dict[str, Any]
     }
 
     messages = _build_messages(preprocess_payload)
-    version = os.getenv("MEM0_MEMORY_VERSION", "v2")
 
     try:
-        client.add(messages, user_id=user_hash, metadata=metadata, version=version)
+        # Local Mem0 Memory.add; keeps all data on this machine
+        client.add(messages, user_id=user_hash, metadata=metadata)
         return True
     except Exception as exc:  # pragma: no cover - runtime safety
         logger.warning("Mem0 write failed: %s", exc)
