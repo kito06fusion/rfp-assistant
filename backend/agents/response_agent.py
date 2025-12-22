@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 from backend.llm.client import chat_completion
 from backend.models import BuildQuery, ResponseResult
 from backend.knowledge_base import FusionAIxKnowledgeBase
 from backend.agents.prompts import RESPONSE_SYSTEM_PROMPT
+from backend.memory.mem0_client import search_memories
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,15 @@ def run_response_agent(
 
     req_summary = build_query.solution_requirements_summary
     struct_summary = build_query.response_structure_requirements_summary
+
+    # Attempt to retrieve relevant local memories to augment context
+    retrieved_memories: List[Dict[str, Any]] = []
+    try:
+        retrieved_memories = search_memories(req_summary or "", max_results=3, stage="requirements")
+        if retrieved_memories:
+            logger.info("Included %d local memory snippets in prompt", len(retrieved_memories))
+    except Exception as mem_exc:
+        logger.warning("Local memory search failed: %s", mem_exc)
     
     user_prompt_parts = [
         f"REQUIREMENT TO ADDRESS:",
@@ -60,6 +70,23 @@ def run_response_agent(
     if fusionaix_context:
         user_prompt_parts.append(f"FUSIONAIX CONTEXT: {fusionaix_context}")
         user_prompt_parts.append("")
+
+    # Inject local memory snippets (if any) into the prompt as additional context
+    if retrieved_memories:
+        user_prompt_parts.extend([
+            "=" * 80,
+            "LOCAL MEMORY (mem0) - Relevant snippets (use as additional context):",
+            "=" * 80,
+        ])
+        for mem in retrieved_memories:
+            score = mem.get("score")
+            snippet = mem.get("snippet") or ""
+            # include slightly more content if available in messages
+            messages = mem.get("messages") or []
+            msg_content = "".join([str(m.get("content") or "") for m in messages[:2]])
+            piece = snippet or (msg_content[:1000])
+            user_prompt_parts.append(f"MEMORY (score={score:.3f}): {piece}")
+            user_prompt_parts.append("")
     
     if qa_context:
         user_prompt_parts.extend([
@@ -163,7 +190,7 @@ def run_response_agent(
     return ResponseResult(
         response_text=response_text,
         build_query_used=build_query.query_text,
-        num_retrieved_chunks=0,
+        num_retrieved_chunks=len(retrieved_memories or []),
         notes="Generated response",
     )
 

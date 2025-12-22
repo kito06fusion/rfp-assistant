@@ -156,6 +156,24 @@ The **“5. Response”** tab shows a textual indication that the DOCX/PDF was g
   - Build‑query metadata
     This file is **ignored by git** and stays on the local machine or backend container only.
 
+  Quick local retrieval example
+
+  - The backend includes a simple local search API in `backend/memory/mem0_client.py`:
+    - `search_memories(query: str, max_results: int = 5, stage: Optional[str] = None)`
+    - It loads `backend/memory/data/memories.jsonl` and returns the top matching records using a small token-overlap score.
+  - Usage (from Python agent code):
+
+    ```py
+    from backend.memory.mem0_client import search_memories
+
+    matches = search_memories("unclear requirement about hosting", max_results=3, stage="requirements")
+    for m in matches:
+        # m contains the original record plus `score` and `snippet`
+        print(m["score"], m["snippet"])
+    ```
+
+  - Suggested integration: when an LLM or agent indicates low understanding for a requirement, call `search_memories()` and inject the `snippet` or full `messages` into the prompt as extra context before re-asking the model.
+
 ## Setup
 
 See `docker-compose.yml` for deployment configuration. The system requires:
@@ -167,6 +185,7 @@ See `docker-compose.yml` for deployment configuration. The system requires:
 - **Optional vision OCR**:
   - `HF_TOKEN` for HuggingFace (used by the Qwen vision model)
 - **Python dependencies**: see `requirements.txt`
+- **Node.js dependencies**: see `package.json`
 
 # Output Location
 
@@ -180,8 +199,10 @@ Generated documents are saved to:
 
 Start up Docker:
 
-```
-docker compose up -d --build.
-```
+docker compose up -d --buildThen open the UI at `http://localhost:8000` and work through the tabs:
 
-Then open the UI at `http://localhost:8000`
+1. Upload your RFP.
+2. Review/edit OCR text and run **Preprocess**.
+3. Inspect and, if needed, edit **Requirements**.
+4. Build and confirm the **Build Query**, then answer any critical questions in the chat panel.
+5. Generate the final DOCX/PDF from the **Response** tab and download it.

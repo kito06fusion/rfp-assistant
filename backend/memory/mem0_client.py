@@ -3,8 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
+import os
+import math
+import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +16,20 @@ logger = logging.getLogger(__name__)
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 STORE_PATH = DATA_DIR / "memories.jsonl"
+EMBED_CACHE_PATH = DATA_DIR / "embeddings.jsonl"
+
+# Retrieval method: 'token' (default) or 'embeddings'
+RETRIEVAL_METHOD = os.environ.get("MEM0_RETRIEVAL_METHOD", "token").lower()
+# Embedding model name (used with HF/Azure/OpenAI clients)
+# Prefer using the same embedding model as the RAG system when available.
+_default_embedding = os.environ.get("MEM0_EMBEDDING_MODEL")
+if not _default_embedding:
+    try:
+        from backend.rag.rag_system import EMBEDDING_MODEL as _RAG_EMBEDDING
+        _default_embedding = _RAG_EMBEDDING
+    except Exception:
+        _default_embedding = "text-embedding-3-small"
+EMBEDDING_MODEL = os.environ.get("MEM0_EMBEDDING_MODEL", _default_embedding)
 
 
 def _append_record(record: Dict[str, Any]) -> bool:
@@ -193,3 +211,233 @@ def store_build_query_result(source_text: str, build_query_payload: Dict[str, An
     else:
         logger.warning("Mem0: failed to store build-query record for user_id=%s", user_hash[:12])
     return ok
+
+
+def _tokenize(text: str) -> list[str]:
+    """Very small tokenizer: extract word characters, lowercase."""
+    if not text:
+        return []
+    return re.findall(r"\w+", text.lower())
+
+
+def search_memories(query: str, max_results: int = 5, stage: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Search the local JSONL memory store for records relevant to `query`.
+
+    This uses a lightweight token-overlap scoring (zero dependencies) and returns
+    the top `max_results` records. Each returned record contains the original
+    record plus `score` and `snippet` fields.
+
+    Parameters:
+    - query: text query to search for
+    - max_results: maximum number of records to return
+    - stage: optional stage filter (e.g. "preprocess", "requirements", "build_query")
+
+    Returns: list of records (may be empty)
+    """
+    results: List[Dict[str, Any]] = []
+    if not query or not STORE_PATH.exists():
+        logger.debug("Mem0 search skipped: empty query or missing store (exists=%s)", STORE_PATH.exists())
+        return results
+
+    q_tokens = _tokenize(query)
+    if not q_tokens:
+        logger.debug("Mem0 search: query tokenization produced no tokens: %r", query)
+        return results
+
+    logger.info("Mem0 search starting: method=%s query_len=%d stage=%s max_results=%d", RETRIEVAL_METHOD, len(query), stage, max_results)
+
+    try:
+        with STORE_PATH.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except Exception:
+                    # skip malformed lines
+                    continue
+
+                if stage and record.get("stage") != stage:
+                    continue
+
+                # build searchable text from messages and metadata
+                parts: List[str] = []
+                for m in record.get("messages", []) or []:
+                    parts.append(str(m.get("content") or ""))
+                meta = record.get("metadata") or {}
+                for v in meta.values():
+                    parts.append(str(v))
+                doc_text = " ".join(parts).strip().lower()
+                if not doc_text:
+                    continue
+
+                doc_tokens = _tokenize(doc_text)
+                if not doc_tokens:
+                    continue
+
+                # Choose retrieval method
+                if RETRIEVAL_METHOD == "embeddings":
+                    # We'll compute embeddings later in a second pass; collect candidate info now
+                    out = dict(record)
+                    out["_doc_text"] = doc_text
+                    results.append(out)
+                else:
+                    # simple token-overlap score (counts occurrences)
+                    score = 0
+                    for qt in q_tokens:
+                        # number of occurrences of token in doc
+                        occ = doc_tokens.count(qt)
+                        if occ:
+                            score += occ
+
+                    # normalize by document length to avoid bias towards long records
+                    denom = max(1, len(doc_tokens))
+                    normalized = score / denom
+                    if normalized <= 0:
+                        # keep low scores out to reduce noise
+                        continue
+
+                    # generate a short snippet around the first matching token
+                    snippet = ""
+                    first_pos = None
+                    for i, t in enumerate(doc_tokens):
+                        if t in q_tokens:
+                            first_pos = i
+                            break
+                    if first_pos is not None:
+                        start = max(0, first_pos - 8)
+                        end = min(len(doc_tokens), first_pos + 24)
+                        snippet = " ".join(doc_tokens[start:end])
+
+                    out = dict(record)
+                    out["score"] = normalized
+                    out["snippet"] = snippet
+                    results.append(out)
+
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning("Failed to read/search memories file: %s", exc)
+        return []
+
+    # If using embeddings, compute embeddings for query and candidate docs
+    if RETRIEVAL_METHOD == "embeddings" and results:
+        try:
+            q_emb = _get_embedding(query)
+            logger.info("Mem0: computed query embedding (len=%d)", len(q_emb) if q_emb else 0)
+            if not q_emb:
+                raise RuntimeError("Failed to compute query embedding")
+            scored: List[Dict[str, Any]] = []
+            for rec in results:
+                doc_text = rec.get("_doc_text") or ""
+                doc_emb = _embedding_for_record_cached(rec, doc_text)
+                logger.debug("Mem0: candidate doc fingerprint present: %s, emb_len=%d", rec.get("user_id") or "<no-user>", len(doc_emb) if doc_emb else 0)
+                if not doc_emb:
+                    continue
+                sim = _cosine_similarity(q_emb, doc_emb)
+                if sim and sim > 0:
+                    out = dict(rec)
+                    out.pop("_doc_text", None)
+                    out["score"] = sim
+                    tokens = _tokenize(doc_text)
+                    out["snippet"] = " ".join(tokens[:60])
+                    scored.append(out)
+            scored.sort(key=lambda r: r.get("score", 0), reverse=True)
+            logger.info("Mem0 embeddings retrieval: %d candidates scored, returning top %d", len(scored), min(max_results, len(scored)))
+            return scored[:max_results]
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("Embeddings retrieval failed, falling back to token matches: %s", e)
+
+    # sort and return top results (token overlap path)
+    # sort and return top results (token overlap path)
+    results.sort(key=lambda r: r.get("score", 0), reverse=True)
+    logger.info("Mem0 token retrieval: %d matches found, returning top %d", len(results), min(max_results, len(results)))
+    # log top results at debug level
+    for r in results[:min(5, len(results))]:
+        try:
+            logger.debug("Mem0 match: user_id=%s score=%.4f snippet=%s", (r.get("user_id") or "<no-user>")[:12], r.get("score", 0.0), (r.get("snippet") or "")[:200])
+        except Exception:
+            pass
+    return results[:max_results]
+
+
+def _cosine_similarity(a: List[float], b: List[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    num = sum(x * y for x, y in zip(a, b))
+    denom = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
+    if denom == 0:
+        return 0.0
+    return num / denom
+
+
+def _get_embedding(text: str) -> List[float]:
+    """Compute an embedding for `text` using the configured LLM client.
+
+    Prefers HF client when `HF_TOKEN` is set, otherwise Azure OpenAI when AZURE_* env vars are present.
+    """
+    from backend.llm.client import get_hf_client, get_azure_client
+
+    if not text:
+        return []
+
+    try:
+        if os.environ.get("HF_TOKEN"):
+            client = get_hf_client()
+            logger.debug("Mem0 embedding: using HF client, model=%s", EMBEDDING_MODEL)
+            resp = client.embeddings.create(model=EMBEDDING_MODEL, input=text)
+            emb = resp.data[0].embedding
+            logger.debug("Mem0 embedding: HF response length=%d", len(emb) if emb else 0)
+            return list(emb)
+        elif os.environ.get("AZURE_OPENAI_API_KEY"):
+            client = get_azure_client()
+            logger.debug("Mem0 embedding: using Azure client, model=%s", EMBEDDING_MODEL)
+            resp = client.embeddings.create(model=EMBEDDING_MODEL, input=text)
+            emb = resp.data[0].embedding
+            logger.debug("Mem0 embedding: Azure response length=%d", len(emb) if emb else 0)
+            return list(emb)
+    except Exception as e:
+        logger.warning("Failed to compute embedding: %s", e)
+        return []
+    logger.debug("No embedding client available for mem0 (HF_TOKEN / AZURE_OPENAI_API_KEY missing)")
+    return []
+
+
+def _record_fingerprint(record: Dict[str, Any]) -> str:
+    s = json.dumps(record.get("messages") or [] , sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+
+def _embedding_for_record_cached(record: Dict[str, Any], doc_text: str) -> List[float]:
+    """Return embedding for a record, using on-disk cache at `EMBED_CACHE_PATH`.
+
+    Cache format: JSONL with objects {"fp": fingerprint, "embedding": [...], "ts": ts}
+    """
+    fp = _record_fingerprint(record)
+    cache: Dict[str, List[float]] = {}
+    try:
+        if EMBED_CACHE_PATH.exists():
+            with EMBED_CACHE_PATH.open("r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        o = json.loads(line)
+                        if o.get("fp") and o.get("embedding"):
+                            cache[o["fp"]] = o["embedding"]
+                    except Exception:
+                        continue
+    except Exception:
+        cache = {}
+
+    if fp in cache:
+        return cache[fp]
+
+    emb = _get_embedding(doc_text)
+    if not emb:
+        return []
+
+    try:
+        with EMBED_CACHE_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"fp": fp, "embedding": emb, "ts": int(time.time())}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+    return emb
