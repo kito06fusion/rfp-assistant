@@ -1,21 +1,11 @@
-# RFP Response Assistant
-
-An AI-powered system for processing Request for Proposals (RFPs) and generating comprehensive response documents. The system uses a multi-agent pipeline to extract, analyze, and respond to RFP requirements.
-
-## Test Documents
-
-Test documents can be found in the `test_documents/` folder:
-
-- **`Global Contractor Agencies RFP - Nov 2025.docx`** - An RFP document that does **not** have a required response structure. The system will generate responses per individual requirement.
-- **`MTI_BPM_Tender_Example_from_RFP.pdf`** - An RFP document that **does** have a required response structure. The system will detect this structure and generate a structured response following the specified format.
-
 ## Complete Pipeline Sequence
 
 The RFP Assistant processes documents through the following sequence from user upload to final output:
 
 ### 1. Document Upload
 
-- User uploads an RFP document (supports PDF, DOCX, DOC, XLSX, XLS, TXT)
+- User uploads one or more RFP documents (supports PDF, DOCX, DOC, XLSX, XLS, TXT).
+- The **Upload** section shows basic file info and triggers the backend pipeline.
 
 ### 2. Text Extraction (OCR)
 
@@ -24,131 +14,174 @@ The RFP Assistant processes documents through the following sequence from user u
   - `python-docx` for DOCX files
   - `pandas` for Excel files
   - Direct file reading for TXT files
-- **Vision OCR Fallback**: If direct extraction fails or returns insufficient text (e.g., scanned documents), the system:
+- **Vision OCR Fallback**: If direct extraction fails or returns insufficient text (e.g., scanned PDFs):
   - Converts the document to images (PDF → images, DOCX → PDF → images)
-  - Uses the Qwen2.5-VL-7B-Instruct vision model to extract text from each page
+  - Uses the **Qwen2.5‑VL‑7B‑Instruct** vision model to extract text from each page
   - Combines all extracted text with page break markers
+- The resulting raw text is shown in the **“1. OCR (Qwen)”** tab, where you can *edit the OCR text* before running the next step.
 
-### 3. Extraction Agent
+### 3. Preprocess Agent
 
-- Analyzes the extracted text to identify:
-  - Document language
-  - CPV codes (Common Procurement Vocabulary), code used in Europe to define rfp goal and requirements
-  - Other classification codes
-  - Key requirements summary
-  - Metadata and document structure
+- Runs a single LLM‑based preprocessing step (`gpt-5-chat` on Azure OpenAI) over the full OCR text to:
+  - Detect **document language**
+  - Extract **CPV codes** and other classification metadata
+  - Produce a **key requirements summary**
+  - Split the text into:
+    - **Cleaned text** (essential content kept for downstream steps)
+    - **Removed text** (boilerplate, legal, non‑essential content)
+- Includes an internal **comparison check** to confirm that nothing essential was removed.
+- In the frontend:
+  - The OCR text can be edited before you click **“Confirm & Run Preprocess”**.
+  - The **“2. Preprocess Agent”** tab shows a formatted view of the result and lets you toggle an editable JSON view for advanced tweaks.
+  - Confirming preprocess automatically kicks off the Requirements Agent.
 
-### 4. Scope Agent
+### 4. Requirements Agent
 
-- Analyzes the full text to distinguish:
-  - **Essential text**: Content relevant to solution requirements and response structure
-  - **Removed text**: Boilerplate, legal disclaimers, and non-essential content
-- Provides rationale for what was kept vs. removed
-- Has a comparison agent within to check whether removed information does not contain essential text
-- User can review and manually edit the scoped text before proceeding
+- Processes the **cleaned text** from preprocess to extract:
+  - **Solution Requirements**: specific requirements that must be addressed in the response
+  - **Response Structure Requirements**: instructions on how the response should be formatted/structured
+- Each requirement is categorized and normalized.
+- **Structure Detection**:
+  - Automatically detects if the RFP specifies an explicit response structure.
+  - If structure is detected with confidence ≥ 0.6:
+    - The system can generate a single, structured response document.
+  - Otherwise:
+    - It falls back to per‑requirement responses.
+- The **“3. Requirements”** tab shows a human‑readable summary and an optional JSON editor so you can adjust requirements before continuing.
 
-### 5. Requirements Agent
+### 5. Build Query
 
-- Processes the essential text to extract:
-  - **Solution Requirements**: Specific requirements that need to be addressed in the response
-  - **Response Structure Requirements**: Instructions on how the response should be formatted/structured
-- Each requirement is categorized and normalized
-- **Structure Detection**: Automatically detects if the RFP specifies an explicit response structure:
-  - If structure is detected with high confidence (≥0.6), the system will use structured response generation
-  - Otherwise, it generates responses per individual requirement
-
-### 6. Build Query
-
-- Consolidates all requirements and extraction data into a comprehensive query
+- Consolidates all requirements and preprocess metadata into a single **build query** object.
 - Includes:
   - Summary of solution requirements
-  - Response structure requirements (if any)
-  - Context from extraction (language, codes, key requirements)
-- User can review and confirm the build query before generating responses
+  - Summary of response‑structure requirements
+  - Context from preprocess (language, codes, key requirements)
+- The **“4. Build Query”** tab:
+  - Displays the full build‑query text
+  - Lets you edit the text in place via a simple editor
+  - Allows you to **confirm** the build query once you are happy
+- When you confirm the build query, the system:
+  - Starts an **iterative Q&A flow** (see below)
+  - Requires all critical questions to be answered before you can generate the final response
 
-### 7. Q&A Chat Session
+### 6. Q&A Chat Session (Iterative Critical Questions)
 
-- **Step 1: RAG Information Retrieval**
+The Q&A flow runs in the right‑hand **Interactive Q&A** panel, independent from the main tabs.
 
-  - The system first uses RAG (Retrieval-Augmented Generation) to search the document library for relevant information related to each requirement
-  - RAG retrieves relevant chunks from prior RFP responses and knowledge documents
-  - This identifies what information is **already available** in the knowledge base
-- **Step 2: Question Generation**
+- The backend keeps a **conversation session** with:
+  - All generated questions
+  - All user answers
+  - A compact Q&A context string used during response generation
 
-  - Based on the RAG retrieval results, the system generates questions for information that is **missing or unclear**
-  - Questions focus on gaps where:
-    - Information is not found in RAG results
-    - Details are ambiguous or need clarification
-    - Company-specific information is required
-  - The system avoids generating questions for information already found in RAG context
-- **Step 3: User Answers**
+The flow works as follows:
 
-  - Users provide answers to the generated questions
-  - Answers are incorporated into the response generation context
-  - This enriches responses with specific company information, clarifications, and details not available in the knowledge base
+1. **Iterative question generation**
 
-### 8. Response Generation
+   - After the build query is confirmed, the backend uses:
+     - The requirements
+     - The build query
+     - (Optionally) RAG context from your documents
+   - It generates **one critical question at a time** for missing or ambiguous information.
+   - The UI shows the current question plus a running history of previous Q&A.
+2. **User answers**
 
-The system uses one of two approaches based on structure detection:
+   - You answer each question in the chat panel.
+   - You can also **Skip** a question; skipped questions are still recorded as “[Skipped]”.
+   - After each answer, the backend:
+     - Updates the conversation context
+     - Optionally enriches the build query internally
+3. **Completion**
+
+   - Once no more questions are needed, the Q&A panel shows **“All critical questions answered”**.
+   - Only when all questions are answered (or explicitly skipped) can you confirm the build query and move on to response generation.
+   - The Q&A context is injected into the response‑generation step so the final document reflects your answers.
+
+### 7. Response Generation
+
+The system uses one of two approaches based on structure detection in the requirements:
 
 #### A. Structured Response (when explicit structure detected)
 
-- Generates a single, comprehensive response following the detected structure
-- Organizes content according to the specified sections/format
-- Uses the `structured_response_agent` to create a cohesive document
+- Generates a single, comprehensive response following the detected structure.
+- Organizes content according to the specified sections/format.
+- Uses the `structured_response_agent` to create a cohesive, document‑level answer.
 
-#### B. Per-Requirement Response (default)
+#### B. Per‑Requirement Response (default path)
 
-- Generates individual responses for each solution requirement
+- Generates individual responses for each **solution requirement**.
 - For each requirement:
-  - Builds a focused query for that specific requirement
-  - Uses the `response_agent` with:
-    - Knowledge base (company capabilities, case studies, accelerators)
-    - RAG system (if enabled) to retrieve relevant context from document library
-    - Q&A context (if chat session was used)
-  - Assesses response quality (completeness, relevance, etc.)
-- Combines all individual responses into a single document
+  - Builds a focused build‑query for that single requirement.
+  - Invokes the `response_agent` with:
+    - The company knowledge base (capabilities, case studies, accelerators)
+    - The **RAG system** (if enabled) to retrieve relevant context from your `docs/` library
+    - The **Q&A conversation context** gathered in the chat panel
+  - Runs a **quality assessment** to score completeness and relevance and track issues/suggestions.
+- All per‑requirement responses are then combined into one final document.
 
-### 9. Output Generation
+The **“5. Response”** tab shows a textual indication that the DOCX/PDF was generated successfully (and its size) rather than an inline preview.
 
-- Generates a formatted Word document (DOCX) containing:
-  - Document title and metadata
-  - Response structure requirements (if any)
-  - All solution requirement responses
-  - Quality assessments and notes
-- Document is saved to `output/docx/` directory
-- User can download the document directly from the frontend
+### 8. Output Generation
+
+- Generates a formatted **Word document (DOCX)** for both structured and per‑requirement modes.
+- Depending on the path:
+  - For structured responses, the full RFP answer is written to a single DOCX file.
+  - For per‑requirement responses, each requirement’s answer is assembled into the final document.
+- Output location on disk:
+  - `output/docx/` — generated Word documents
+  - `output/pdfs/` — generated PDFs (when PDF generation is used)
+  - `output/markdown/` — generated Markdown files (when markdown export is used)
+- The frontend automatically triggers a download when you generate a response; you can also find the file in the `output/` directory if running locally.
 
 ## Architecture
 
-- **Backend**: FastAPI (Python) with multiple specialized agents
-- **Frontend**: React with Vite
-- **LLM**: Azure OpenAI (configurable model)
-- **RAG System**: FAISS-based vector search for document retrieval
-- **Knowledge Base**: Company capabilities, case studies, and accelerators
+- **Backend**: FastAPI (Python) with multiple specialized agents:
+  - Text extraction pipeline
+  - Preprocess agent
+  - Requirements agent + structure detection
+  - Per‑requirement response agent
+  - Structured response agent
+  - Question‑generation and Q&A session handling
+- **Frontend**: React + Vite, with:
+  - Upload section
+  - Pipeline progress tracker
+  - Agent tabs (`OCR`, `Preprocess`, `Requirements`, `Build Query`, `Response`)
+  - Fixed chat sidebar for the Q&A flow
+- **LLM**: **Azure OpenAI** via `AzureOpenAI` (no direct OpenAI usage):
+  - `gpt-5-chat` (or your configured deployment) for all text‑only agents
+- **RAG System**: FAISS‑based vector search over documents in the `docs/` folder.
+- **Knowledge Base**: Hand‑crafted company knowledge (capabilities, case studies, accelerators) loaded from `backend/knowledge_base`.
+- **Local Memory Store**: Lightweight JSONL store at `backend/memory/data/memories.jsonl` that records anonymized snapshots of:
+  - Preprocess results
+  - Requirements extraction
+  - Build‑query metadata
+    This file is **ignored by git** and stays on the local machine or backend container only.
 
 ## Setup
 
 See `docker-compose.yml` for deployment configuration. The system requires:
 
-- Azure OpenAI API credentials
-- Optional: HuggingFace token for vision model OCR
-- Python dependencies (see `requirements.txt`)
-- Node.js dependencies (see `package.json`)
+- **Azure OpenAI**:
+  - `AZURE_OPENAI_API_KEY`
+  - `AZURE_OPENAI_ENDPOINT`
+  - (Optional) `AZURE_OPENAI_API_VERSION` and `AZURE_OPENAI_DEPLOYMENT_NAME`
+- **Optional vision OCR**:
+  - `HF_TOKEN` for HuggingFace (used by the Qwen vision model)
+- **Python dependencies**: see `requirements.txt`
 
 # Output Location
 
 Generated documents are saved to:
 
-- `output/docx/` - Word documents
-- `output/pdfs/` - PDF files (if generated)
-- `output/markdown/` - Markdown files (if generated)
+- `output/docx/` — Word documents
+- `output/pdfs/` — PDF files (if generated)
+- `output/markdown/` — Markdown files (if generated)
 
 # How to use
 
-Start up docker:
+Start up Docker:
 
-- ```
-  docker compose up -d --build
-  ```
-- Visit UI on localhost:8000
+```
+docker compose up -d --build.
+```
+
+Then open the UI at `http://localhost:8000`
