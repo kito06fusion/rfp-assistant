@@ -14,6 +14,68 @@ logger = logging.getLogger(__name__)
 RESPONSE_MODEL = "gpt-5-chat"
 
 
+def _clarity_check(requirement_text: str, structure_text: Optional[str] = None) -> dict:
+    if not requirement_text:
+        return {"clarity": "unclear", "questions": ["Requirement text is empty"], "raw": ""}
+
+    prompt_parts = [
+        "You are an assistant whose job is ONLY to check clarity of an RFP requirement for the purpose of deciding whether to fetch additional local context.",
+        "Do NOT attempt to answer the requirement or search for answers. Instead, analyze the provided requirement text and determine whether it is sufficiently clear to write a complete, detailed response.",
+        "Respond with a JSON object only, with keys: `clarity` (either \"clear\" or \"unclear\"), `questions` (an array of concise clarifying questions if unclear, otherwise an empty array), and `explanation` (one-sentence rationale).",
+        "Be brief and precise."
+    ]
+    prompt_parts.append("REQUIREMENT_TEXT:\n" + (requirement_text or ""))
+    if structure_text:
+        prompt_parts.append("RESPONSE_STRUCTURE_GUIDANCE:\n" + structure_text)
+
+    user_prompt = "\n\n".join(prompt_parts)
+
+    try:
+        resp = chat_completion(
+            model=RESPONSE_MODEL,
+            messages=[
+                {"role": "system", "content": RESPONSE_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.0,
+            max_tokens=300,
+        )
+    except Exception as e:
+        logger.warning("Clarity check LLM call failed: %s", e)
+        return {"clarity": "unclear", "questions": [], "raw": ""}
+
+    parsed = {"clarity": "unclear", "questions": [], "raw": resp}
+    try:
+        import json
+
+        j = json.loads(resp)
+        if isinstance(j, dict):
+            clarity = j.get("clarity") or j.get("status") or "unclear"
+            clarity = str(clarity).strip().lower()
+            if clarity not in ("clear", "unclear"):
+                if "yes" in clarity or "clear" in clarity:
+                    clarity = "clear"
+                else:
+                    clarity = "unclear"
+            questions = j.get("questions") or j.get("clarifying_questions") or []
+            if isinstance(questions, str):
+                questions = [questions]
+            parsed = {"clarity": clarity, "questions": list(questions), "raw": resp}
+            return parsed
+    except Exception:
+        pass
+
+    low = (resp or "").lower()
+    if any(k in low for k in ("unclear", "not clear", "need", "clarif", "missing", "ambigu")):
+        qs = [l.strip() for l in resp.splitlines() if l.strip().endswith("?")][:6]
+        parsed = {"clarity": "unclear", "questions": qs, "raw": resp}
+    else:
+        parsed = {"clarity": "clear", "questions": [], "raw": resp}
+
+    return parsed
+
+
+
 def run_response_agent(
     build_query: BuildQuery,
     temperature: float = 0.0,
@@ -44,14 +106,39 @@ def run_response_agent(
     req_summary = build_query.solution_requirements_summary
     struct_summary = build_query.response_structure_requirements_summary
 
-    # Attempt to retrieve relevant local memories to augment context
     retrieved_memories: List[Dict[str, Any]] = []
     try:
-        retrieved_memories = search_memories(req_summary or "", max_results=3, stage="requirements")
-        if retrieved_memories:
-            logger.info("Included %d local memory snippets in prompt", len(retrieved_memories))
-    except Exception as mem_exc:
-        logger.warning("Local memory search failed: %s", mem_exc)
+        clarity = _clarity_check(req_summary or "", struct_summary or None)
+        logger.info("Clarity check result: %s (questions=%d)", clarity.get("clarity"), len(clarity.get("questions") or []))
+        logger.debug("Clarity check raw output: %s", (clarity.get("raw") or "")[:2000])
+        if clarity.get("questions"):
+            try:
+                logger.info("Clarity check questions: %s", clarity.get("questions"))
+            except Exception:
+                logger.debug("Clarity questions logging failed")
+
+        if clarity.get("clarity") == "unclear":
+            try:
+                retrieved_memories = search_memories(req_summary or "", max_results=3, stage="requirements")
+                if retrieved_memories:
+                    ids_scores = []
+                    for m in retrieved_memories:
+                        uid = (m.get("user_id") or "")[:12]
+                        score = m.get("score") or 0.0
+                        ids_scores.append(f"{uid}:{score:.3f}")
+                    logger.info("Included %d local memory snippets in prompt due to clarity check (ids/scores=%s)", len(retrieved_memories), ",".join(ids_scores))
+            except Exception as mem_exc:
+                logger.warning("Local memory search failed: %s", mem_exc)
+        else:
+            logger.debug("Skipping local memory retrieval; requirement considered clear by LLM")
+    except Exception as e:
+        logger.warning("Clarity check failed, falling back to retrieving local memories: %s", e)
+        try:
+            retrieved_memories = search_memories(req_summary or "", max_results=3, stage="requirements")
+            if retrieved_memories:
+                logger.info("Included %d local memory snippets in prompt (fallback)", len(retrieved_memories))
+        except Exception as mem_exc:
+            logger.warning("Local memory search failed (fallback): %s", mem_exc)
     
     user_prompt_parts = [
         f"REQUIREMENT TO ADDRESS:",

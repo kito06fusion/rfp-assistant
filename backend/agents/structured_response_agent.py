@@ -12,6 +12,8 @@ from backend.models import (
 from backend.rag import RAGSystem
 from backend.knowledge_base import FusionAIxKnowledgeBase
 from backend.agents.prompts import STRUCTURED_RESPONSE_SYSTEM_PROMPT
+from backend.agents.response_agent import _clarity_check
+from backend.memory.mem0_client import search_memories
 
 logger = logging.getLogger(__name__)
 STRUCTURED_RESPONSE_MODEL = "gpt-5-chat"
@@ -108,7 +110,6 @@ def run_structured_response_agent(
             retrieved_chunks = []
     
     chunks_text = format_retrieved_chunks(retrieved_chunks, max_chunks=5, max_total_chars=3000)
-    
     fusionaix_context = ""
     if knowledge_base is not None:
         try:
@@ -126,13 +127,53 @@ def run_structured_response_agent(
     solution_reqs_parts = []
     for req in requirements_result.solution_requirements:
         req_summary = req.source_text[:150] + ("..." if len(req.source_text) > 150 else "")
-        # The requirement `type` field was removed; include the summary only.
         solution_reqs_parts.append(f"- {req_summary}")
     solution_reqs_text = "\n".join(solution_reqs_parts)
     
     structure_desc = structure_detection.structure_description
     if len(structure_desc) > 500:
         structure_desc = structure_desc[:500] + "..."
+
+    try:
+        clarity_input = solution_reqs_text
+        clarity = _clarity_check(clarity_input or "", structure_desc or None)
+        logger.info("Structured clarity check: %s (questions=%d)", clarity.get("clarity"), len(clarity.get("questions") or []))
+        logger.debug("Structured clarity raw output: %s", (clarity.get("raw") or "")[:2000])
+        if clarity.get("questions"):
+            logger.info("Structured clarity questions: %s", clarity.get("questions"))
+
+        retrieved_memories: List[Dict[str, Any]] = []
+        if clarity.get("clarity") == "unclear":
+            try:
+                retrieved_memories = search_memories(clarity_input or "", max_results=5, stage="requirements")
+                if retrieved_memories:
+                    ids_scores = []
+                    for m in retrieved_memories:
+                        uid = (m.get("user_id") or "")[:12]
+                        score = m.get("score") or 0.0
+                        ids_scores.append(f"{uid}:{score:.3f}")
+                    logger.info("Structured flow included %d local memory snippets (ids/scores=%s)", len(retrieved_memories), ",".join(ids_scores))
+            except Exception as mem_e:
+                logger.warning("Structured flow local memory search failed: %s", mem_e)
+        else:
+            logger.debug("Structured flow skipping mem0; requirements considered clear by LLM")
+    except Exception as e:
+        logger.warning("Structured clarity check failed: %s", e)
+        retrieved_memories = []
+
+    if 'retrieved_memories' in locals() and retrieved_memories:
+        user_prompt_extra_mem = ["", "=" * 80, "LOCAL MEMORY (mem0) - Relevant snippets (use as additional context):", "=" * 80]
+        for mem in retrieved_memories:
+            score = mem.get("score")
+            snippet = mem.get("snippet") or ""
+            messages = mem.get("messages") or []
+            msg_content = "".join([str(m.get("content") or "") for m in messages[:2]])
+            piece = snippet or (msg_content[:1000])
+            user_prompt_extra_mem.append(f"MEMORY (score={score:.3f}): {piece}")
+            user_prompt_extra_mem.append("")
+        mem_section_text = "\n".join(user_prompt_extra_mem)
+    else:
+        mem_section_text = ""
     
     user_prompt_parts = [
         "RFP RESPONSE STRUCTURE REQUIREMENTS:",
@@ -158,24 +199,19 @@ def run_structured_response_agent(
             "",
         ])
     
-    # Add RAG chunks (if available)
-    # NOTE: RAG chunks may contain similar information to Q&A answers, but RAG is from prior documents
-    # while Q&A is user-provided for this specific RFP. Both are included but Q&A takes precedence.
     if chunks_text:
         user_prompt_parts.extend([
             chunks_text,
             "",
         ])
+
+    if mem_section_text:
+        user_prompt_parts.append(mem_section_text)
+        user_prompt_parts.append("")
     
-    # Add Q&A context (user-provided answers take precedence over RAG)
-    # NOTE: Q&A answers may overlap with RAG chunks, but Q&A is more specific and current.
-    # The model should prioritize Q&A information when there's overlap.
     if qa_context:
-        # Limit Q&A context length to avoid excessive tokens
-        # Q&A is critical user input, but we can still be reasonable about length
         qa_context_limited = qa_context
         if len(qa_context) > 4000:  # Limit to ~1000 tokens
-            # Keep first part and indicate truncation
             qa_context_limited = qa_context[:4000] + "\n\n[Q&A context truncated for length - use provided information fully]"
         
         user_prompt_parts.extend([
