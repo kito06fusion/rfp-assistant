@@ -69,6 +69,7 @@ export default function AgentPanel({ agentId }) {
   const [requirementsDraft, setRequirementsDraft] = useState('')
   const [buildQueryDraft, setBuildQueryDraft] = useState('')
   const [questionsGenerated, setQuestionsGenerated] = useState(false)
+  const [isGeneratingDocx, setIsGeneratingDocx] = useState(false)
   
   // Initialize OCR draft when OCR data is first available
   useEffect(() => {
@@ -307,8 +308,13 @@ export default function AgentPanel({ agentId }) {
       })
       return
     }
+    if (isGeneratingDocx) {
+      // Already in progress locally — ignore duplicate clicks
+      return
+    }
 
     try {
+      setIsGeneratingDocx(true)
       console.log('Starting response generation...', {
         sessionId: chatSessionId,
         useRag: true,
@@ -350,6 +356,9 @@ export default function AgentPanel({ agentId }) {
       console.error(err)
       updateStatus('response', 'error')
       setSummary(`Failed to generate response: ${err.message}`)
+    }
+    finally {
+      setIsGeneratingDocx(false)
     }
   }
 
@@ -764,8 +773,8 @@ export default function AgentPanel({ agentId }) {
       
       {config.showGenerate && agentId === 'build-query' && confirmations.buildQueryConfirmed && questionsGenerated && allQuestionsAnswered && (
         <div className="accept-row" style={{ marginTop: '0.5rem' }}>
-          <Button onClick={handleGenerateResponse} disabled={status === 'processing'}>
-            Generate DOCX
+          <Button onClick={handleGenerateResponse} disabled={status === 'processing' || isGeneratingDocx || statuses.response === 'processing'}>
+            {isGeneratingDocx || statuses.response === 'processing' ? 'Generating...' : 'Generate DOCX'}
           </Button>
         </div>
       )}
