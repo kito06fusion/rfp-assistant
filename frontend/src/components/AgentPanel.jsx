@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { usePipeline } from '../context/PipelineContext'
 import { runPreprocess, runRequirements, buildQuery, generateResponse, createChatSession, updateRequirements, getSession } from '../services/api'
 import StatusPill from './StatusPill'
@@ -70,6 +70,8 @@ export default function AgentPanel({ agentId }) {
   const [buildQueryDraft, setBuildQueryDraft] = useState('')
   const [questionsGenerated, setQuestionsGenerated] = useState(false)
   const [isGeneratingDocx, setIsGeneratingDocx] = useState(false)
+  const generatingRef = useRef(false)
+  const generationTimeoutRef = useRef(null)
   
   // Initialize OCR draft when OCR data is first available
   useEffect(() => {
@@ -151,6 +153,17 @@ export default function AgentPanel({ agentId }) {
       }
     }
   }, [chatSessionId, questionsGenerated])
+
+  // Cleanup generation timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (generationTimeoutRef.current) {
+        clearTimeout(generationTimeoutRef.current)
+        generationTimeoutRef.current = null
+      }
+      generatingRef.current = false
+    }
+  }, [])
   const config = AGENT_CONFIGS[agentId]
 
   // Handle build query button click
@@ -308,13 +321,19 @@ export default function AgentPanel({ agentId }) {
       })
       return
     }
-    if (isGeneratingDocx) {
-      // Already in progress locally — ignore duplicate clicks
-      return
-    }
+    // Synchronous guard to prevent re-entry before React state updates
+    if (generatingRef.current) return
+    generatingRef.current = true
+    setIsGeneratingDocx(true)
+    // Fallback timer: in case something hangs, automatically unlock after 60s
+    if (generationTimeoutRef.current) clearTimeout(generationTimeoutRef.current)
+    generationTimeoutRef.current = setTimeout(() => {
+      generatingRef.current = false
+      setIsGeneratingDocx(false)
+      generationTimeoutRef.current = null
+    }, 60000)
 
     try {
-      setIsGeneratingDocx(true)
       console.log('Starting response generation...', {
         sessionId: chatSessionId,
         useRag: true,
@@ -358,6 +377,12 @@ export default function AgentPanel({ agentId }) {
       setSummary(`Failed to generate response: ${err.message}`)
     }
     finally {
+      // Clear fallback timer and reset both the ref and the state
+      if (generationTimeoutRef.current) {
+        clearTimeout(generationTimeoutRef.current)
+        generationTimeoutRef.current = null
+      }
+      generatingRef.current = false
       setIsGeneratingDocx(false)
     }
   }
