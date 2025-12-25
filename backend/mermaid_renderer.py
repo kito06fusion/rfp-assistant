@@ -24,6 +24,37 @@ _DATA_URL_RE = re.compile(
 )
 
 
+def _collect_text_from_response(response) -> str:
+    parts = []
+    outs = getattr(response, "output", None) or []
+    try:
+        for item in outs:
+            if isinstance(item, dict):
+                content = item.get("content")
+                if isinstance(content, list):
+                    for c in content:
+                        if isinstance(c, dict):
+                            if "text" in c and isinstance(c["text"], str):
+                                parts.append(c["text"])
+                            elif c.get("type") == "output_text" and isinstance(c.get("text"), str):
+                                parts.append(c.get("text"))
+                        elif isinstance(c, str):
+                            parts.append(c)
+                elif isinstance(content, str):
+                    parts.append(content)
+            elif isinstance(item, str):
+                parts.append(item)
+    except Exception:
+        parts = []
+
+    if not parts:
+        ot = getattr(response, "output_text", None)
+        if ot:
+            parts.append(ot)
+
+    return "".join(parts)
+
+
 def _decode_data_url_image(output_text: str, expected_fmt: str) -> Optional[bytes]:
     m = _DATA_URL_RE.search(output_text)
     if not m:
@@ -108,31 +139,34 @@ Here is the diagram:
 
     output_text = None
     try:
-        output_text = getattr(response, "output_text", None)
-        if not output_text:
-            outs = getattr(response, "output", None)
-            if outs and isinstance(outs, list) and len(outs) > 0:
-                candidate = outs[0]
-                content = candidate.get("content") if isinstance(candidate, dict) else None
-                if isinstance(content, list):
-                    parts = []
-                    for part in content:
-                        if isinstance(part, dict):
-                            parts.append(part.get("text", ""))
-                        elif isinstance(part, str):
-                            parts.append(part)
-                    output_text = "".join(parts)
-                elif isinstance(candidate, str):
-                    output_text = candidate
+        output_text = _collect_text_from_response(response)
     except Exception:
-        output_text = None
+        output_text = getattr(response, "output_text", None)
 
     if not output_text:
         raise RuntimeError("MCP mermaid renderer did not return any textual output")
 
     output_text = output_text.strip()
 
-    data_decoded = _decode_data_url_image(output_text, expected_fmt=fmt)
+    data_decoded = None
+    try:
+        if fmt == "png":
+            m_md = re.search(r"data:image/png;base64,([A-Za-z0-9+/=\s]+)", output_text, flags=re.I)
+            if m_md:
+                b64 = re.sub(r"\s+", "", m_md.group(1))
+                b64 = re.sub(r"[^A-Za-z0-9+/=]", "", b64)
+                pad = (-len(b64)) % 4
+                if pad:
+                    b64 += "=" * pad
+                try:
+                    data_decoded = base64.b64decode(b64)
+                except Exception:
+                    data_decoded = None
+    except Exception:
+        data_decoded = None
+
+    if not data_decoded:
+        data_decoded = _decode_data_url_image(output_text, expected_fmt=fmt)
     if data_decoded:
         if fmt == "png":
             if _is_png(data_decoded) or _is_jpg(data_decoded):

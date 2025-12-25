@@ -37,7 +37,6 @@ except Exception:
 def _sanitize_mermaid_labels(diagram: str) -> str:
     if not diagram:
         return diagram
-    # Normalize smart quotes and stray whitespace that can break renderers
     return (
         diagram.replace('“', '"')
         .replace('”', '"')
@@ -53,6 +52,39 @@ try:
 except Exception:
     CAIROS_AVAILABLE = False
     logger.warning("cairosvg not available. SVG->PNG conversion will be disabled.")
+
+
+def _normalize_svg_bytes(svg_bytes: bytes) -> bytes:
+    if not svg_bytes:
+        return svg_bytes
+    b = svg_bytes.lstrip()
+    try:
+        low = b.lower()
+        idx = low.find(b"<svg")
+        if idx > 0:
+            b = b[idx:]
+    except Exception:
+        pass
+    return b
+
+
+def _svg_to_png(svg_bytes: bytes) -> Optional[bytes]:
+    if not CAIROS_AVAILABLE:
+        return None
+    try:
+        svg_bytes = _normalize_svg_bytes(svg_bytes)
+        png = cairosvg.svg2png(bytestring=svg_bytes)
+        if png and png.startswith(b"\x89PNG\r\n\x1a\n"):
+            return png
+        logger.warning("SVG->PNG conversion did not produce PNG header (len=%d)", len(png) if png else 0)
+        return None
+    except Exception as e:
+        logger.exception("SVG->PNG conversion failed: %s", e)
+        return None
+
+
+def _is_png_bytes(data: bytes) -> bool:
+    return bool(data) and data.startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def clear_paragraph(paragraph):
@@ -476,7 +508,9 @@ def _parse_markdown_to_docx(doc, text: str):
             if rendered:
                 if CAIROS_AVAILABLE:
                     try:
-                        png_bytes = cairosvg.svg2png(bytestring=rendered)
+                        png_bytes = _svg_to_png(rendered)
+                        if png_bytes is None:
+                            logger.warning('Failed to convert SVG->PNG via cairosvg (normalized path returned None)')
                     except Exception as e:
                         logger.warning('Failed to convert SVG->PNG via cairosvg: %s', e)
                         png_bytes = None
@@ -588,6 +622,10 @@ def _parse_markdown_to_docx(doc, text: str):
                                         im.verify()
                                     except Exception:
                                         logger.warning('Rendered mermaid bytes are not a valid image according to PIL; falling back to Kroki')
+                                        rendered = None
+                                else:
+                                    if not _is_png_bytes(rendered):
+                                        logger.warning('Rendered mermaid bytes do not have a PNG header; falling back to Kroki')
                                         rendered = None
 
                                 if rendered:
