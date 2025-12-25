@@ -16,6 +16,7 @@ QUESTION_MODEL = "gpt-5-chat"
 
 MAX_CRITICAL_QUESTIONS = 5
 
+ #function to determine the next single most critical clarification question
 def get_next_critical_question(
     requirements_result: RequirementsResult,
     company_kb: CompanyKnowledgeBase,
@@ -196,6 +197,7 @@ IMPORTANT:
         return None, 0, rag_contexts_by_req
 
 
+#function to check whether more clarification questions are needed and return next question
 def check_if_more_questions_needed(
     requirements_result: RequirementsResult,
     company_kb: CompanyKnowledgeBase,
@@ -216,7 +218,7 @@ def check_if_more_questions_needed(
     
     return True, question, remaining, rag_contexts_by_req
 
-
+#function to collect compact RAG context for a requirement (search k chunks)
 def _build_rag_context_for_requirement(
     requirement: RequirementItem,
     rag_system: Optional[RAGSystem],
@@ -258,7 +260,7 @@ def _build_rag_context_for_requirement(
         logger.warning("RAG lookup for requirement %s failed: %s", requirement.id, e)
         return ""
 
-
+#function to heuristically test if a question is already answered by rag_context
 def _is_question_covered_by_rag(question_text: str, rag_context: str) -> bool:
     if not rag_context or not question_text:
         return False
@@ -273,7 +275,7 @@ def _is_question_covered_by_rag(question_text: str, rag_context: str) -> bool:
     overlap = sum(1 for w in words if w in rc)
     return overlap >= 2
 
-
+#function to generate a list of follow-up questions for a requirement
 def generate_questions(
     requirement: RequirementItem,
     all_requirements: List[RequirementItem],
@@ -409,7 +411,7 @@ If no questions are needed (all information is clear, in knowledge base, or any 
         logger.exception("Full traceback:")
         return []
 
-
+#function to analyze all solution requirements and produce questions and rag contexts
 def analyze_build_query_for_questions(
     build_query: BuildQuery,
     requirements_result: RequirementsResult,
@@ -592,7 +594,7 @@ Return an EMPTY ARRAY [] if:
     
     return critical_questions, rag_contexts_by_req
 
-
+#function to consolidate and select the most critical questions from a list
 def _consolidate_critical_questions(
     questions: List[Dict[str, Any]],
     company_kb: CompanyKnowledgeBase,
@@ -654,7 +656,7 @@ Only output the JSON array, nothing else.
     
     return questions[:max_questions]
 
-
+#function (legacy) to derive questions from a whole build query rather than per-requirement
 def analyze_build_query_for_questions_legacy(
     build_query: BuildQuery,
     company_kb: CompanyKnowledgeBase,
@@ -753,7 +755,7 @@ Output a JSON array of questions, each with:
         logger.exception("Full traceback:")
         return []
 
-
+#function to generate questions for multiple requirements and return mapping by requirement id
 def analyze_requirements_for_questions(
     requirements: List[RequirementItem],
     company_kb: CompanyKnowledgeBase,
@@ -776,7 +778,7 @@ def analyze_requirements_for_questions(
     
     return all_questions
 
-
+#function to infer which other pending questions are answered by a given answer
 def infer_answered_questions_from_answer(
     answered_question: Question,
     answer_text: str,

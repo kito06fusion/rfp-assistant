@@ -10,6 +10,7 @@ from backend.models import RequirementsResult, ExtractionResult
 logger = logging.getLogger(__name__)
 
 
+#function to generate an RFP document as Markdown bytes from responses
 def generate_rfp_markdown(
     individual_responses: List[Dict[str, Any]],
     requirements_result: RequirementsResult,

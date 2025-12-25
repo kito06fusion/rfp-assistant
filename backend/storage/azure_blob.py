@@ -1,7 +1,3 @@
-"""
-Azure Blob Storage utilities for RAG index storage and retrieval.
-"""
-
 from __future__ import annotations
 
 import io
@@ -20,21 +16,12 @@ load_dotenv()
 
 
 class AzureBlobStorage:
-    """Utility class for managing RAG indexes in Azure Blob Storage."""
-
+    #function to initialize Azure Blob storage client and container
     def __init__(
         self,
         connection_string: Optional[str] = None,
         container_name: str = "rag-indexes",
     ):
-        """
-        Initialize Azure Blob Storage client.
-
-        Args:
-            connection_string: Azure Storage connection string. If None, reads from
-                AZURE_STORAGE_CONNECTION_STRING environment variable.
-            container_name: Name of the blob container to use for storing indexes.
-        """
         self.connection_string = (
             connection_string
             or os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
@@ -51,7 +38,6 @@ class AzureBlobStorage:
                 self.container_client = self.blob_service_client.get_container_client(
                     self.container_name
                 )
-                # Ensure container exists
                 try:
                     self.container_client.create_container()
                     logger.info(
@@ -82,24 +68,14 @@ class AzureBlobStorage:
                 "Set AZURE_STORAGE_CONNECTION_STRING environment variable to enable."
             )
 
+    #function to check if Azure Blob storage client and container are available
     def is_available(self) -> bool:
-        """Check if Azure Blob Storage is configured and available."""
         return self.blob_service_client is not None and self.container_client is not None
 
+    #function to upload a file from disk to Azure Blob Storage
     def upload_file(
         self, blob_name: str, file_path: Path, overwrite: bool = True
     ) -> bool:
-        """
-        Upload a file to Azure Blob Storage.
-
-        Args:
-            blob_name: Name of the blob in Azure Storage.
-            file_path: Local path to the file to upload.
-            overwrite: Whether to overwrite if blob already exists.
-
-        Returns:
-            True if upload succeeded, False otherwise.
-        """
         if not self.is_available():
             logger.warning("Azure Blob Storage not available, cannot upload file")
             return False
@@ -127,20 +103,10 @@ class AzureBlobStorage:
             )
             return False
 
+    #function to upload raw bytes as a blob to Azure Blob Storage
     def upload_bytes(
         self, blob_name: str, data: bytes, overwrite: bool = True
     ) -> bool:
-        """
-        Upload bytes data to Azure Blob Storage.
-
-        Args:
-            blob_name: Name of the blob in Azure Storage.
-            data: Bytes data to upload.
-            overwrite: Whether to overwrite if blob already exists.
-
-        Returns:
-            True if upload succeeded, False otherwise.
-        """
         if not self.is_available():
             logger.warning("Azure Blob Storage not available, cannot upload bytes")
             return False
@@ -163,17 +129,8 @@ class AzureBlobStorage:
             )
             return False
 
+    #function to download a blob to a local file path
     def download_file(self, blob_name: str, file_path: Path) -> bool:
-        """
-        Download a file from Azure Blob Storage to local filesystem.
-
-        Args:
-            blob_name: Name of the blob in Azure Storage.
-            file_path: Local path where the file should be saved.
-
-        Returns:
-            True if download succeeded, False otherwise.
-        """
         if not self.is_available():
             logger.warning("Azure Blob Storage not available, cannot download file")
             return False
@@ -212,16 +169,8 @@ class AzureBlobStorage:
             )
             return False
 
+    #function to download raw bytes for a named blob
     def download_bytes(self, blob_name: str) -> Optional[bytes]:
-        """
-        Download bytes data from Azure Blob Storage.
-
-        Args:
-            blob_name: Name of the blob in Azure Storage.
-
-        Returns:
-            Bytes data if download succeeded, None otherwise.
-        """
         if not self.is_available():
             logger.warning("Azure Blob Storage not available, cannot download bytes")
             return None
@@ -258,16 +207,8 @@ class AzureBlobStorage:
             )
             return None
 
+    #function to check whether a blob exists in the container
     def blob_exists(self, blob_name: str) -> bool:
-        """
-        Check if a blob exists in Azure Blob Storage.
-
-        Args:
-            blob_name: Name of the blob in Azure Storage.
-
-        Returns:
-            True if blob exists, False otherwise.
-        """
         if not self.is_available():
             return False
 
@@ -280,16 +221,8 @@ class AzureBlobStorage:
             )
             return False
 
+    #function to delete a blob by name
     def delete_blob(self, blob_name: str) -> bool:
-        """
-        Delete a blob from Azure Blob Storage.
-
-        Args:
-            blob_name: Name of the blob in Azure Storage.
-
-        Returns:
-            True if deletion succeeded, False otherwise.
-        """
         if not self.is_available():
             logger.warning("Azure Blob Storage not available, cannot delete blob")
             return False
@@ -309,16 +242,8 @@ class AzureBlobStorage:
             )
             return False
 
+    #function to list blob names optionally filtered by prefix
     def list_blobs(self, prefix: Optional[str] = None) -> list[str]:
-        """
-        List all blobs in the container, optionally filtered by prefix.
-
-        Args:
-            prefix: Optional prefix to filter blob names.
-
-        Returns:
-            List of blob names.
-        """
         if not self.is_available():
             return []
 

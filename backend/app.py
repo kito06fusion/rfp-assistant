@@ -54,6 +54,7 @@ from backend.memory.mem0_client import (
 )
 
 
+#function to setup rag system and load the fusionAIx knowledge base
 def _setup_rag_and_kb(use_rag: bool) -> tuple[Optional[RAGSystem], FusionAIxKnowledgeBase]:
     rag_system = None
     if use_rag:
@@ -100,6 +101,7 @@ def _setup_rag_and_kb(use_rag: bool) -> tuple[Optional[RAGSystem], FusionAIxKnow
     return rag_system, knowledge_base
 
 
+#function to enrich a build query with compact RAG index previews
 def _enrich_build_query_with_rag(
     build_query: BuildQuery,
     requirements_result: RequirementsResult,
@@ -145,6 +147,7 @@ def _enrich_build_query_with_rag(
     return build_query
 
 
+#function to validate extraction and requirements before generating responses
 def validate_before_generation(
     extraction_result: ExtractionResult,
     requirements_result: RequirementsResult,
@@ -242,6 +245,7 @@ elif frontend_src.exists():
 
 _fusionaix_kb: FusionAIxKnowledgeBase | None = None
 
+#function to return a cached fusionAIx knowledge base instance
 def get_fusionaix_kb() -> FusionAIxKnowledgeBase:
     global _fusionaix_kb
     if _fusionaix_kb is None:
@@ -256,6 +260,7 @@ def get_fusionaix_kb() -> FusionAIxKnowledgeBase:
     return _fusionaix_kb
 
 
+#function to serve the frontend index.html at root
 @app.get("/", response_class=HTMLResponse)
 async def index() -> HTMLResponse:
     project_root = Path(__file__).resolve().parent.parent
@@ -270,6 +275,7 @@ async def index() -> HTMLResponse:
 SUPPORTED_FILE_TYPES = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".txt"}
 
 
+#function to process uploaded RFP files and extract combined text
 @app.post("/process-rfp")
 async def process_rfp(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
     request_id = str(uuid.uuid4())
@@ -365,9 +371,10 @@ class PreprocessRequest(BaseModel):
 
 class RenderRequest(BaseModel):
     diagram: str
-    format: str = 'png'  # png or svg
+    format: str = 'png'
 
 
+#function to run the preprocess agent on OCR text
 @app.post("/run-preprocess")
 async def run_preprocess(req: PreprocessRequest) -> Dict[str, Any]:
     request_id = str(uuid.uuid4())
@@ -407,12 +414,13 @@ async def run_preprocess(req: PreprocessRequest) -> Dict[str, Any]:
 
     try:
         store_preprocess_result(req.ocr_text, preprocess_res.to_dict())
-    except Exception as exc:  # pragma: no cover - defensive logging
+    except Exception as exc:
         logger.warning("Mem0 preprocess storage failed: %s", exc)
 
     return response
 
 
+#function to render mermaid diagrams (via local renderer or Kroki fallback)
 @app.post('/render/mermaid')
 async def render_mermaid(req: RenderRequest):
     diagram = (req.diagram or "").strip()
@@ -483,6 +491,7 @@ class RequirementsRequest(BaseModel):
 class UpdateRequirementsRequest(BaseModel):
     requirements: Dict[str, Any]
 
+#function to run requirements agent and detect structure of responses
 @app.post("/run-requirements")
 async def run_requirements(req: RequirementsRequest) -> Dict[str, Any]:
     logger.info(
@@ -518,12 +527,13 @@ async def run_requirements(req: RequirementsRequest) -> Dict[str, Any]:
 
     try:
         store_requirements_result(req.essential_text, result.to_dict())
-    except Exception as exc:  # pragma: no cover - defensive logging
+    except Exception as exc:
         logger.warning("Mem0 requirements storage failed: %s", exc)
 
     return result.to_dict()
 
 
+#function to update and validate requirements payload
 @app.post("/update-requirements")
 async def update_requirements(req: UpdateRequirementsRequest) -> Dict[str, Any]:
     logger.info("Update requirements endpoint called")
@@ -542,12 +552,8 @@ class BuildQueryRequest(BaseModel):
     requirements: Dict[str, Any]
 
 
+#function to extract a short title from key requirements summary
 def _extract_title_from_key_requirements(key_requirements_summary: str) -> Optional[str]:
-    """Extract the first bullet point from key_requirements_summary to use as title.
-    
-    The key_requirements_summary is expected to be a string with bullet points separated by newlines.
-    This function extracts the first bullet point (removing the bullet marker) to use as the document title.
-    """
     if not key_requirements_summary:
         return None
     
@@ -566,6 +572,7 @@ def _extract_title_from_key_requirements(key_requirements_summary: str) -> Optio
     return None
 
 
+#function to convert a PreprocessResult into an ExtractionResult
 def _extraction_from_preprocess(pre: PreprocessResult) -> ExtractionResult:
     return ExtractionResult(
         translated_text="",
@@ -575,6 +582,7 @@ def _extraction_from_preprocess(pre: PreprocessResult) -> ExtractionResult:
     )
 
 
+#function to build a query from preprocess and requirements
 @app.post("/build-query")
 async def build_query_endpoint(req: BuildQueryRequest) -> Dict[str, Any]:
     logger.info("Build query endpoint called")
@@ -607,6 +615,7 @@ class GenerateResponseRequest(BaseModel):
     session_id: Optional[str] = None
 
 
+#function to generate responses (structured or per-requirement) for requirements
 @app.post("/generate-response")
 async def generate_response_endpoint(req: GenerateResponseRequest) -> Dict[str, Any]:
     logger.info("Generate response endpoint called (use_rag=%s)", req.use_rag)
@@ -686,6 +695,7 @@ async def generate_response_endpoint(req: GenerateResponseRequest) -> Dict[str, 
         ) from exc
 
 
+#function to generate a single structured response and return a DOCX
 async def _generate_structured_response(
     extraction_result: ExtractionResult,
     requirements_result: RequirementsResult,
@@ -787,6 +797,7 @@ async def _generate_structured_response(
         ) from exc
 
 
+#function to assemble individual responses into a DOCX response file
 def _generate_docx_response(
     individual_responses: List[Dict[str, Any]],
     extraction_result: ExtractionResult,
@@ -844,6 +855,7 @@ def _generate_docx_response(
     )
 
 
+#function to generate responses per solution requirement and return DOCX
 async def _generate_per_requirement_response(
     extraction_result: ExtractionResult,
     requirements_result: RequirementsResult,
@@ -1243,6 +1255,7 @@ async def _generate_per_requirement_response(
 _conversation_sessions: Dict[str, ConversationContext] = {}
 _company_kb_instance: Optional[CompanyKnowledgeBase] = None
 
+#function to return a cached company knowledge base instance
 def get_company_kb() -> CompanyKnowledgeBase:
     global _company_kb_instance
     if _company_kb_instance is None:
@@ -1261,6 +1274,7 @@ class EnrichBuildQueryRequest(BaseModel):
     session_id: Optional[str] = None
 
 
+#function to generate clarification questions from build_query or requirements
 @app.post("/generate-questions")
 async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str, Any]:
     logger.info("Generate questions endpoint called")
@@ -1278,7 +1292,7 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
                     build_query_obj,
                     requirements_result,
                     company_kb,
-                    max_questions_per_requirement=1,  # Only critical questions
+                    max_questions_per_requirement=1,
                     rag_system=rag_system,
                 )
                 enriched_build_query = _enrich_build_query_with_rag(
@@ -1329,7 +1343,7 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
             questions_dict = analyze_requirements_for_questions(
                 requirements_result.solution_requirements,
                 company_kb,
-                max_questions_per_requirement=1,  # Only critical questions
+                max_questions_per_requirement=1,
                 rag_system=rag_system,
             )
             
@@ -1351,7 +1365,7 @@ async def generate_questions_endpoint(req: GenerateQuestionsRequest) -> Dict[str
             return {
                 "questions": all_questions,
                 "questions_by_requirement": {
-                    req_id: questions  # questions are already dicts, no need to call model_dump()
+                    req_id: questions
                     for req_id, questions in questions_dict.items()
                 },
             }
@@ -1372,6 +1386,7 @@ class GetNextQuestionRequest(BaseModel):
     session_id: Optional[str] = None
 
 
+#function to return the next critical question for iterative Q&A
 @app.post("/get-next-question")
 async def get_next_question_endpoint(req: GetNextQuestionRequest) -> Dict[str, Any]:
     logger.info("Get next question (session=%s)", req.session_id)
@@ -1437,6 +1452,7 @@ class SubmitIterativeAnswerRequest(BaseModel):
     requirements: Dict[str, Any]
 
 
+#function to submit an iterative answer and return the next question
 @app.post("/submit-answer-get-next")
 async def submit_answer_and_get_next(req: SubmitIterativeAnswerRequest) -> Dict[str, Any]:
     logger.info("Submit answer for %s and get next", req.question_id)
@@ -1519,6 +1535,7 @@ class CreateSessionRequest(BaseModel):
     requirement_id: Optional[str] = None
 
 
+#function to create a new chat session for iterative Q&A
 @app.post("/chat/session")
 async def create_chat_session(req: CreateSessionRequest) -> Dict[str, Any]:
     session_id = str(uuid.uuid4())
@@ -1537,6 +1554,7 @@ class AddQuestionsRequest(BaseModel):
     questions: List[Dict[str, Any]]
 
 
+#function to add questions to an existing chat session
 @app.post("/chat/questions")
 async def add_questions(req: AddQuestionsRequest) -> Dict[str, Any]:
     if req.session_id not in _conversation_sessions:
@@ -1559,6 +1577,7 @@ class SubmitAnswerRequest(BaseModel):
     answer_text: str
 
 
+#function to submit an answer to a question in a chat session
 @app.post("/chat/answer")
 async def submit_answer(req: SubmitAnswerRequest) -> Dict[str, Any]:
     if req.session_id not in _conversation_sessions:
@@ -1628,6 +1647,7 @@ async def submit_answer(req: SubmitAnswerRequest) -> Dict[str, Any]:
     }
 
 
+#function to return the state of a chat session (questions and answers)
 @app.get("/chat/session/{session_id}")
 async def get_session(session_id: str) -> Dict[str, Any]:
     if session_id not in _conversation_sessions:
@@ -1644,6 +1664,7 @@ async def get_session(session_id: str) -> Dict[str, Any]:
     }
 
 
+#function to enrich build query with session context (no-op if none)
 @app.post("/enrich-build-query")
 async def enrich_build_query_endpoint(req: EnrichBuildQueryRequest) -> Dict[str, Any]:
     try:
@@ -1795,7 +1816,6 @@ async def preview_context_endpoint(req: PreviewContextRequest | None = None) -> 
             "message": "POST /preview-context expected. Use POST with JSON body {preprocess, requirements, use_rag, num_retrieval_chunks, session_id}.",
             "note": "This GET response is a diagnostic fallback. Use POST to fetch RAG context snippets.",
         }
-    """Return lightweight RAG retrieval snippets per requirement without running the response generator."""
     logger.info("Preview context endpoint called")
     try:
         preprocess_result = PreprocessResult(**req.preprocess)

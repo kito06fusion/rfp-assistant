@@ -36,6 +36,7 @@ CHUNK_OVERLAP = 200
 
 class RAGSystem:
 
+    #function to initialize RAG system, index paths, and optional Azure storage
     def __init__(
         self,
         docs_folder: str = "docs",
@@ -74,9 +75,11 @@ class RAGSystem:
             "enabled" if self.azure_blob and self.azure_blob.is_available() else "disabled",
         )
 
+    #function to compute a stable hash for a query string
     def _get_query_hash(self, query: str) -> str:
         return hashlib.sha256(query.encode('utf-8')).hexdigest()
 
+    #function to load cached query embeddings from disk if available
     def _load_query_cache(self) -> None:
         if self.query_cache_path and self.query_cache_path.exists():
             try:
@@ -95,6 +98,7 @@ class RAGSystem:
                 logger.warning("Failed to load query cache: %s", e)
                 self._query_embedding_cache = {}
 
+    #function to save query embedding cache to disk
     def _save_query_cache(self) -> None:
         if self.query_cache_path:
             try:
@@ -109,6 +113,7 @@ class RAGSystem:
             except Exception as e:
                 logger.warning("Failed to save query cache: %s", e)
 
+    #function to obtain or create the embedding client (Azure/OpenAI)
     def _get_embedding_client(self):
         if self.client is None:
             embedding_api_key = os.environ.get("AZURE_OPENAI_EMBEDDING_API_KEY")
@@ -129,6 +134,7 @@ class RAGSystem:
                 self.client = get_azure_client()
         return self.client
 
+    #function to generate embeddings for a list of texts (batch with fallback)
     def _generate_embeddings(self, texts: List[str]) -> np.ndarray:
         client = self._get_embedding_client()
         embedding_deployment = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME", EMBEDDING_MODEL)
@@ -192,6 +198,7 @@ class RAGSystem:
         )
         return embeddings_array
 
+    #function to split long text into overlapping chunks for indexing
     def _chunk_text(self, text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
         text_length = len(text)
         logger.info("Chunking text: length=%d chars, chunk_size=%d, overlap=%d", text_length, chunk_size, overlap)
@@ -234,6 +241,7 @@ class RAGSystem:
         
         return chunks
 
+    #function to load document content (txt/pdf/docx) and extract text
     def _load_document(self, file_path: Path) -> str:
         suffix = file_path.suffix.lower()
         file_size = file_path.stat().st_size if file_path.exists() else 0
@@ -258,6 +266,7 @@ class RAGSystem:
             logger.error("Failed to load document %s: %s", file_path, str(e))
             raise
 
+    #function to compute a manifest (size/mtime) for files under docs folder
     def _compute_docs_manifest(self) -> Dict[str, Dict[str, Any]]:
         manifest: Dict[str, Dict[str, Any]] = {}
 
@@ -284,6 +293,7 @@ class RAGSystem:
         )
         return manifest
 
+    #function to build a FAISS index from documents under the docs folder
     def build_index(self) -> None:
         if not self.docs_folder.exists():
             raise ValueError(f"Docs folder does not exist: {self.docs_folder}")
@@ -377,6 +387,7 @@ class RAGSystem:
         if self.index_path:
             self.save_index()
 
+    #function to derive blob names for index, metadata and manifest
     def _get_blob_names(self) -> Tuple[str, str, str]:
         if self.index_path:
             base_name = self.index_path.name
@@ -388,6 +399,7 @@ class RAGSystem:
             f"{base_name}.docs_manifest.pkl",
         )
 
+    #function to save FAISS index, metadata and manifest locally and optionally to Azure
     def save_index(self) -> None:
         if self.index_path is None:
             raise ValueError("index_path not set, cannot save index")
@@ -454,6 +466,7 @@ class RAGSystem:
             except Exception as e:
                 logger.warning("Failed to save index to Azure Blob Storage: %s", str(e))
 
+    #function to load index and metadata from local files or Azure Blob Storage
     def load_index(self) -> None:
         if self.index_path is None:
             raise ValueError("index_path not set, cannot load index")
@@ -529,6 +542,7 @@ class RAGSystem:
             self.docs_folder,
         )
 
+    #function to ensure local index is up-to-date with docs folder, rebuilding if needed
     def ensure_index_up_to_date(self) -> None:
         if self.index_path is None:
             raise ValueError("index_path not set, cannot ensure index up to date")
@@ -588,6 +602,7 @@ class RAGSystem:
         )
         self.build_index()
 
+    #function to search the FAISS index for nearest chunks for a query
     def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         if self.index is None:
             raise ValueError("Index not built. Call build_index() or load_index() first.")
@@ -664,6 +679,7 @@ class RAGSystem:
         
         return results
 
+    #function to return basic statistics about the loaded index and metadata
     def get_stats(self) -> Dict[str, Any]:
         stats = {
             "index_built": self.index is not None,

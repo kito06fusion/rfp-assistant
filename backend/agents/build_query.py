@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 @functools.lru_cache(maxsize=256)
+#function to construct a BuildQuery for a single requirement (cached)
 def _build_query_for_single_requirement_cached(
     extraction_json: str,
     requirement_json: str,
@@ -77,7 +78,7 @@ def _build_query_for_single_requirement_cached(
         confirmed=False,
     )
 
-
+#function to prepare a BuildQuery object for a single requirement (wrapper with caching)
 def build_query_for_single_requirement(
     extraction_result: ExtractionResult,
     single_requirement: RequirementItem,
@@ -113,7 +114,7 @@ def build_query_for_single_requirement(
     
     return result
 
-
+#function to build a full BuildQuery from extraction and requirements (cached)
 @functools.lru_cache(maxsize=128)
 def _build_query_cached(
     extraction_json: str,
@@ -177,7 +178,7 @@ def _build_query_cached(
         confirmed=False,
     )
 
-
+#function to build the overall BuildQuery (wrapper that uses cached builder)
 def build_query(
     extraction_result: ExtractionResult,
     requirements_result: RequirementsResult,

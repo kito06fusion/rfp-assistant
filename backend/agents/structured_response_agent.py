@@ -18,7 +18,7 @@ from backend.memory.mem0_client import search_memories
 logger = logging.getLogger(__name__)
 STRUCTURED_RESPONSE_MODEL = "gpt-5-chat"
 
-
+#function to format retrieved RAG chunks into a compact examples block
 def format_retrieved_chunks(
     chunks: List[Dict[str, Any]],
     max_chunks: int = 4,
@@ -57,7 +57,7 @@ def format_retrieved_chunks(
 
     return "\n".join(formatted)
 
-
+#function to generate a full structured RFP response document using LLM and RAG
 def run_structured_response_agent(
     requirements_result: RequirementsResult,
     structure_detection: StructureDetectionResult,
@@ -90,8 +90,8 @@ def run_structured_response_agent(
                     all_chunks.append(chunk)
                     seen_chunk_ids.add(chunk_id)
             
-            for req in requirements_result.solution_requirements[:5]:  # Search top 5 requirements
-                if len(all_chunks) >= num_retrieval_chunks * 2:  # Limit total chunks
+            for req in requirements_result.solution_requirements[:5]:
+                if len(all_chunks) >= num_retrieval_chunks * 2:
                     break
                 try:
                     req_chunks = rag_system.search(req.source_text, k=min(2, num_retrieval_chunks))
@@ -103,7 +103,7 @@ def run_structured_response_agent(
                 except Exception as req_e:
                     logger.warning("Failed to search RAG for requirement %s: %s", req.id, req_e)
             
-            retrieved_chunks = all_chunks[:num_retrieval_chunks * 2]  # Allow more chunks for structured response
+            retrieved_chunks = all_chunks[:num_retrieval_chunks * 2]
             logger.info("Retrieved %d chunks from RAG (searched structure + %d requirements)", len(retrieved_chunks), min(5, len(requirements_result.solution_requirements)))
         except Exception as e:
             logger.warning("Failed to retrieve chunks from RAG: %s", str(e))
@@ -211,7 +211,7 @@ def run_structured_response_agent(
     
     if qa_context:
         qa_context_limited = qa_context
-        if len(qa_context) > 4000:  # Limit to ~1000 tokens
+        if len(qa_context) > 4000:
             qa_context_limited = qa_context[:4000] + "\n\n[Q&A context truncated for length - use provided information fully]"
         
         user_prompt_parts.extend([

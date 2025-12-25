@@ -8,7 +8,7 @@ from typing import List, Union
 import tempfile
 
 
-from PIL import Image  # type: ignore
+from PIL import Image
 
 from backend.llm.client import chat_completion_with_vision
 
@@ -21,10 +21,10 @@ TEXT_EXTRACTION_MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
 
 MIN_TEXT_LENGTH = 100
 
-
+#function to convert a PDF file into a list of PIL Images for OCR fallback
 def _pdf_to_images(pdf_path: Path) -> List[Image.Image]:
     try:
-        from pdf2image import convert_from_path  # type: ignore
+        from pdf2image import convert_from_path
     except ImportError:
         raise ImportError(
             "pdf2image is required for PDF text extraction. "
@@ -38,10 +38,11 @@ def _pdf_to_images(pdf_path: Path) -> List[Image.Image]:
     logger.info("[Vision OCR Fallback] Converted PDF to %d page image(s)", len(images))
     return images
 
+#function to convert a DOCX file into images via a temporary PDF for OCR fallback
 def _docx_to_images(docx_path: Path) -> List[Image.Image]:
     try:
-        from docx2pdf import convert  # type: ignore
-        from pdf2image import convert_from_path  # type: ignore
+        from docx2pdf import convert
+        from pdf2image import convert_from_path
     except ImportError:
         raise ImportError(
             "docx2pdf and pdf2image are required for DOCX text extraction. "
@@ -66,12 +67,14 @@ def _docx_to_images(docx_path: Path) -> List[Image.Image]:
             except Exception:
                 pass
 
+#function to encode a PIL Image as a base64 PNG data URL
 def _image_to_base64(image: Image.Image) -> str:
     buffered = io.BytesIO()
     image.save(buffered, format="PNG")
     img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{img_base64}"
 
+#function to extract text from images using a vision-capable LLM model
 def _extract_text_from_images(images: List[Image.Image]) -> str:
     logger.info(
         "[Vision OCR] Starting OCR extraction from %d image(s) using model: %s",
@@ -136,9 +139,10 @@ def _extract_text_from_images(images: List[Image.Image]) -> str:
     )
     return full_text
 
+#function to extract text directly from a PDF using pdfplumber when available
 def _extract_text_from_pdf_direct(pdf_path: Path) -> str:
     try:
-        import pdfplumber  # type: ignore
+        import pdfplumber
     except ImportError:
         logger.warning("[PDF Direct Extraction] pdfplumber library not available, skipping direct extraction")
         return ""
@@ -167,10 +171,10 @@ def _extract_text_from_pdf_direct(pdf_path: Path) -> str:
         logger.error("[PDF Direct Extraction] Failed with error: %s", str(e), exc_info=True)
         return ""
 
-
+#function to extract text directly from DOCX files using python-docx when available
 def _extract_text_from_docx_direct(docx_path: Path) -> str:
     try:
-        from docx import Document  # type: ignore
+        from docx import Document
     except ImportError:
         logger.warning("[DOCX Direct Extraction] python-docx library not available, skipping direct extraction")
         return ""
@@ -205,10 +209,10 @@ def _extract_text_from_docx_direct(docx_path: Path) -> str:
         logger.error("[DOCX Direct Extraction] Failed with error: %s", str(e), exc_info=True)
         return ""
 
-
+#function to extract text directly from Excel files using pandas when available
 def _extract_text_from_excel_direct(excel_path: Path) -> str:
     try:
-        import pandas as pd  # type: ignore
+        import pandas as pd
     except ImportError:
         logger.warning(
             "[EXCEL Direct Extraction] pandas library not available, skipping direct extraction. "
@@ -246,7 +250,7 @@ def _extract_text_from_excel_direct(excel_path: Path) -> str:
         )
         return ""
 
-
+#function to extract text from a file path with direct extraction and OCR fallbacks
 def extract_text_from_file(path: PathLike) -> str:
     p = Path(path)
     suffix = p.suffix.lower()

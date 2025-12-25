@@ -33,6 +33,7 @@ We support clients across diverse industries including Insurance, Banking & Fina
 }
 
 
+#function to generate PDF bytes from responses using HTML templates and WeasyPrint
 def generate_rfp_pdf(
     individual_responses: List[Dict[str, Any]],
     requirements_result: RequirementsResult,
@@ -49,6 +50,7 @@ def generate_rfp_pdf(
     static_dir = Path(__file__).parent.parent / "static"
     project_root = Path(__file__).parent.parent.parent
     
+    #function to convert markdown-like response text into safe HTML fragments
     def format_response_text(text: str) -> str:
         if not text:
             return ""

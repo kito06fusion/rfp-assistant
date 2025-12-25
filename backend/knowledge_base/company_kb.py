@@ -33,11 +33,13 @@ class CompanyInfo:
 
 
 class CompanyKnowledgeBase:    
+    #function to initialize the company knowledge base with default info
     def __init__(self):
         self.info = self._load_company_info()
         logger.info("Company knowledge base loaded with %d platforms, %d certifications", 
                    len(self.info.primary_platforms), len(self.info.certifications))
     
+    #function to load default company information into a CompanyInfo dataclass
     def _load_company_info(self) -> CompanyInfo:
         return CompanyInfo(
             primary_platforms=[
@@ -116,6 +118,7 @@ class CompanyKnowledgeBase:
             },
         )
     
+    #function to check whether the KB has relevant info for a given topic
     def has_info(self, topic: str) -> bool:
         topic_lower = topic.lower()
         
@@ -142,6 +145,7 @@ class CompanyKnowledgeBase:
         
         return False
     
+    #function to retrieve a short info string for a given topic if available
     def get_info(self, topic: str) -> Optional[str]:
         topic_lower = topic.lower()
         
@@ -178,6 +182,7 @@ class CompanyKnowledgeBase:
         
         return None
     
+    #function to list all known topics covered by the company KB
     def get_all_known_topics(self) -> List[str]:
         topics = []
         topics.extend(self.info.primary_platforms)
@@ -190,6 +195,7 @@ class CompanyKnowledgeBase:
         topics.extend(["company", "firm", "organization"])
         return topics
     
+    #function to format company info into a prompt-friendly block of text
     def format_for_prompt(self) -> str:
         parts = []
         parts.append("KNOWN COMPANY INFORMATION (Do NOT ask questions about these):")

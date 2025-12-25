@@ -28,21 +28,21 @@ if not _default_embedding:
         _default_embedding = "text-embedding-3-small"
 EMBEDDING_MODEL = os.environ.get("MEM0_EMBEDDING_MODEL", _default_embedding)
 
-
+#function to append a memory record to the local JSONL store
 def _append_record(record: Dict[str, Any]) -> bool:
     try:
         with STORE_PATH.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
         return True
-    except Exception as exc:  # pragma: no cover - defensive logging
+    except Exception as exc:
         logger.warning("Failed to write local memory record: %s", exc)
         return False
 
-
+#function to build stored messages for a preprocess payload
 def _build_messages(preprocess_payload: Dict[str, Any]) -> list[Dict[str, str]]:
     summary = preprocess_payload.get("key_requirements_summary") or "RFP preprocess summary"
     cleaned_text = preprocess_payload.get("cleaned_text") or ""
-    truncated_cleaned = cleaned_text[:4000]  # prevent oversized payloads
+    truncated_cleaned = cleaned_text[:4000]
 
     payload_snapshot = {
         "key_requirements_summary": summary,
@@ -56,7 +56,7 @@ def _build_messages(preprocess_payload: Dict[str, Any]) -> list[Dict[str, str]]:
         {"role": "assistant", "content": json.dumps(payload_snapshot)},
     ]
 
-
+#function to build stored messages for a requirements payload
 def _build_requirements_messages(requirements_payload: Dict[str, Any]) -> list[Dict[str, str]]:
     sol = requirements_payload.get("solution_requirements") or []
     resp = requirements_payload.get("response_structure_requirements") or []
@@ -94,7 +94,7 @@ def _build_requirements_messages(requirements_payload: Dict[str, Any]) -> list[D
         {"role": "assistant", "content": json.dumps(snapshot)},
     ]
 
-
+#function to build stored messages for a build-query payload
 def _build_build_query_messages(build_query_payload: Dict[str, Any]) -> list[Dict[str, str]]:
     query_text = str(build_query_payload.get("query_text") or "")
     sol_summary = str(build_query_payload.get("solution_requirements_summary") or "")
@@ -112,7 +112,7 @@ def _build_build_query_messages(build_query_payload: Dict[str, Any]) -> list[Dic
         {"role": "assistant", "content": json.dumps(snapshot)},
     ]
 
-
+#function to store preprocess results into local memory
 def store_preprocess_result(source_text: str, preprocess_payload: Dict[str, Any]) -> bool:
     if not source_text:
         logger.debug("Mem0: no OCR text supplied; skipping preprocess storage")
@@ -120,7 +120,7 @@ def store_preprocess_result(source_text: str, preprocess_payload: Dict[str, Any]
 
     try:
         user_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
-    except Exception as exc:  # pragma: no cover - defensive logging
+    except Exception as exc:
         logger.warning("Failed to hash OCR text for Mem0 storage: %s", exc)
         return False
 
@@ -145,7 +145,7 @@ def store_preprocess_result(source_text: str, preprocess_payload: Dict[str, Any]
         logger.warning("Mem0: failed to store preprocess record for user_id=%s", user_hash[:12])
     return ok
 
-
+#function to store extracted requirements into local memory
 def store_requirements_result(source_text: str, requirements_payload: Dict[str, Any]) -> bool:
     if not source_text:
         logger.debug("Mem0: no essential text supplied; skipping requirements storage")
@@ -177,7 +177,7 @@ def store_requirements_result(source_text: str, requirements_payload: Dict[str, 
         logger.warning("Mem0: failed to store requirements record for user_id=%s", user_hash[:12])
     return ok
 
-
+#function to store build-query payload into local memory
 def store_build_query_result(source_text: str, build_query_payload: Dict[str, Any]) -> bool:
     if not source_text:
         logger.debug("Mem0: no essential text supplied; skipping build-query storage")
@@ -209,28 +209,14 @@ def store_build_query_result(source_text: str, build_query_payload: Dict[str, An
         logger.warning("Mem0: failed to store build-query record for user_id=%s", user_hash[:12])
     return ok
 
-
+#function to tokenize text into lowercase word tokens
 def _tokenize(text: str) -> list[str]:
-    """Very small tokenizer: extract word characters, lowercase."""
     if not text:
         return []
     return re.findall(r"\w+", text.lower())
 
-
+#function to search local memory records for a text query
 def search_memories(query: str, max_results: int = 5, stage: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Search the local JSONL memory store for records relevant to `query`.
-
-    This uses a lightweight token-overlap scoring (zero dependencies) and returns
-    the top `max_results` records. Each returned record contains the original
-    record plus `score` and `snippet` fields.
-
-    Parameters:
-    - query: text query to search for
-    - max_results: maximum number of records to return
-    - stage: optional stage filter (e.g. "preprocess", "requirements", "build_query")
-
-    Returns: list of records (may be empty)
-    """
     results: List[Dict[str, Any]] = []
     if not query or not STORE_PATH.exists():
         logger.debug("Mem0 search skipped: empty query or missing store (exists=%s)", STORE_PATH.exists())
@@ -303,7 +289,7 @@ def search_memories(query: str, max_results: int = 5, stage: Optional[str] = Non
                     out["snippet"] = snippet
                     results.append(out)
 
-    except Exception as exc:  # pragma: no cover - defensive logging
+    except Exception as exc:
         logger.warning("Failed to read/search memories file: %s", exc)
         return []
 
@@ -331,7 +317,7 @@ def search_memories(query: str, max_results: int = 5, stage: Optional[str] = Non
             scored.sort(key=lambda r: r.get("score", 0), reverse=True)
             logger.info("Mem0 embeddings retrieval: %d candidates scored, returning top %d", len(scored), min(max_results, len(scored)))
             return scored[:max_results]
-        except Exception as e:  # pragma: no cover - defensive
+        except Exception as e:
             logger.warning("Embeddings retrieval failed, falling back to token matches: %s", e)
 
     results.sort(key=lambda r: r.get("score", 0), reverse=True)
@@ -343,7 +329,7 @@ def search_memories(query: str, max_results: int = 5, stage: Optional[str] = Non
             pass
     return results[:max_results]
 
-
+#function to compute cosine similarity between two vectors
 def _cosine_similarity(a: List[float], b: List[float]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
@@ -353,7 +339,7 @@ def _cosine_similarity(a: List[float], b: List[float]) -> float:
         return 0.0
     return num / denom
 
-
+#function to compute an embedding for text using HF or Azure clients
 def _get_embedding(text: str) -> List[float]:
     from backend.llm.client import get_hf_client, get_azure_client
 
@@ -381,17 +367,13 @@ def _get_embedding(text: str) -> List[float]:
     logger.debug("No embedding client available for mem0 (HF_TOKEN / AZURE_OPENAI_API_KEY missing)")
     return []
 
-
+#function to compute a deterministic fingerprint for a memory record
 def _record_fingerprint(record: Dict[str, Any]) -> str:
     s = json.dumps(record.get("messages") or [] , sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
-
+#function to return cached embedding for a record, computing and caching if missing
 def _embedding_for_record_cached(record: Dict[str, Any], doc_text: str) -> List[float]:
-    """Return embedding for a record, using on-disk cache at `EMBED_CACHE_PATH`.
-
-    Cache format: JSONL with objects {"fp": fingerprint, "embedding": [...], "ts": ts}
-    """
     fp = _record_fingerprint(record)
     cache: Dict[str, List[float]] = {}
     try:

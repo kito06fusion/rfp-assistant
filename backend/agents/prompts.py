@@ -50,7 +50,6 @@ CRITICAL RULES:
 - Document formatting handled automatically - provide clean text content only
 - When Q&A context is provided, integrate the FULL information naturally throughout your response - don't just list it, weave it into a cohesive answer with all the details"""
 
-# Diagram guidance: allow the model to include one mermaid chart when it helps
 RESPONSE_SYSTEM_PROMPT += """
 
 DIAGRAM GUIDELINES:
@@ -82,7 +81,6 @@ CRITICAL RULES:
 - When Q&A context is provided, integrate the FULL information naturally throughout relevant sections - don't just list it, weave it into a cohesive answer with all the details
 - Use the knowledge base and RAG context extensively - reference specific capabilities, case studies, and accelerators with concrete details"""
 
-# Diagram guidance for structured responses
 STRUCTURED_RESPONSE_SYSTEM_PROMPT += """
 
 DIAGRAM GUIDELINES:

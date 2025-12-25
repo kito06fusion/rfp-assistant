@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 RESPONSE_MODEL = "gpt-5-chat"
 
-
+#function to run a clarity check on a requirement and return clarifying questions if needed
 def _clarity_check(requirement_text: str, structure_text: Optional[str] = None) -> dict:
     if not requirement_text:
         return {"clarity": "unclear", "questions": ["Requirement text is empty"], "raw": ""}
@@ -75,7 +75,7 @@ def _clarity_check(requirement_text: str, structure_text: Optional[str] = None) 
     return parsed
 
 
-
+#function to generate a detailed response for a single build query using LLM
 def run_response_agent(
     build_query: BuildQuery,
     temperature: float = 0.0,
@@ -94,7 +94,7 @@ def run_response_agent(
     fusionaix_context = ""
     if knowledge_base is not None:
         try:
-            requirement_text = build_query.solution_requirements_summary[:300]  # Limit input
+            requirement_text = build_query.solution_requirements_summary[:300]
             fusionaix_context = knowledge_base.format_for_prompt(requirement_text)
             if len(fusionaix_context) > 600:
                 fusionaix_context = fusionaix_context[:600] + "..."
@@ -217,7 +217,7 @@ def run_response_agent(
     
     system_tokens = len(RESPONSE_SYSTEM_PROMPT) // 4
     user_tokens = len(user_prompt) // 4
-    total_input_tokens = system_tokens + user_tokens + 100  # +100 for overhead
+    total_input_tokens = system_tokens + user_tokens + 100
     logger.info(
         "Prompt tokens: system=%d, user=%d, total_input=%d",
         system_tokens,

@@ -37,6 +37,7 @@ class Accelerator:
 
 class FusionAIxKnowledgeBase:
     
+    #function to initialize fusionAIx knowledge base and load data
     def __init__(self):
         self.capabilities = self._load_capabilities()
         self.case_studies = self._load_case_studies()
@@ -44,6 +45,7 @@ class FusionAIxKnowledgeBase:
         self.company_overview = self._get_company_overview()
         self.key_differentiators = self._get_key_differentiators()
     
+    #function to load predefined capability entries
     def _load_capabilities(self) -> List[Capability]:
         return [
             Capability(
@@ -119,6 +121,7 @@ class FusionAIxKnowledgeBase:
             ),
         ]
     
+    #function to load predefined case studies
     def _load_case_studies(self) -> List[CaseStudy]:
         return [
             CaseStudy(
@@ -195,6 +198,7 @@ class FusionAIxKnowledgeBase:
             ),
         ]
     
+    #function to load predefined accelerator definitions
     def _load_accelerators(self) -> List[Accelerator]:
         return [
             Accelerator(
@@ -294,6 +298,7 @@ class FusionAIxKnowledgeBase:
             ),
         ]
     
+    #function to return a long company overview string
     def _get_company_overview(self) -> str:
         return """At fusionAIx, we believe that the future of digital transformation lies in the seamless blend of low-code platforms and artificial intelligence. Our core team brings together decades of implementation experience, domain expertise, and a passion for innovation. We partner with enterprises to reimagine processes, accelerate application delivery, and unlock new levels of efficiency. We help businesses scale smarter, faster, and with greater impact.
 
@@ -309,6 +314,7 @@ To accelerate time-to-value, fusionAIx offers proprietary accelerators and solut
 
 We support clients across diverse industries including Insurance, Banking & Finance, Government & Public Sector, Automotive & Fleet Management, and Travel & Tourism, combining platform expertise with structured knowledge transfer to help customers build sustainable, future-ready capabilities."""
     
+    #function to list key differentiators for the company
     def _get_key_differentiators(self) -> List[str]:
         return [
             "Great Place To Work® Certified Company for 2025–26",
@@ -323,6 +329,7 @@ We support clients across diverse industries including Insurance, Banking & Fina
             "Commitment to empowering people, industries, and enterprises to thrive in a digital-first world"
         ]
     
+    #function to return capabilities relevant to a requirement text
     def get_relevant_capabilities(self, requirement_text: str) -> List[Capability]:
         requirement_lower = requirement_text.lower()
         relevant = []
@@ -335,8 +342,9 @@ We support clients across diverse industries including Insurance, Banking & Fina
             elif any(diff.lower() in requirement_lower for diff in capability.key_differentiators):
                 relevant.append(capability)
         
-        return relevant if relevant else self.capabilities[:2]  # Return top 2 if no match
+        return relevant if relevant else self.capabilities[:2]
     
+    #function to score and return relevant case studies for a requirement
     def get_relevant_case_studies(self, requirement_text: str, max_results: int = 2) -> List[CaseStudy]:
         requirement_lower = requirement_text.lower()
         scored_studies = []
@@ -358,6 +366,7 @@ We support clients across diverse industries including Insurance, Banking & Fina
         scored_studies.sort(reverse=True, key=lambda x: x[0])
         return [study for _, study in scored_studies[:max_results]]
     
+    #function to find relevant accelerators for a requirement text
     def get_relevant_accelerators(self, requirement_text: str) -> List[Accelerator]:
         requirement_lower = requirement_text.lower()
         relevant = []
@@ -370,6 +379,7 @@ We support clients across diverse industries including Insurance, Banking & Fina
         
         return relevant if relevant else self.accelerators[:2]
     
+    #function to format company knowledge into a prompt-friendly text block
     def format_for_prompt(self, requirement_text: str) -> str:
         parts = []
         
@@ -416,14 +426,14 @@ We support clients across diverse industries including Insurance, Banking & Fina
         
         parts.append("FUSIONAIX KEY DIFFERENTIATORS:")
         parts.append("-" * 80)
-        for diff in self.key_differentiators[:5]:  # Top 5
+        for diff in self.key_differentiators[:5]:
             parts.append(f"• {diff}")
         parts.append("")
         
         return "\n".join(parts)
     
+    #function to get a compact summary suitable for RAG indexing
     def get_summary_for_rag(self) -> str:
-        """Get a summary suitable for RAG indexing."""
         parts = [self.company_overview]
         parts.append("\n\nKey Capabilities:")
         for cap in self.capabilities:

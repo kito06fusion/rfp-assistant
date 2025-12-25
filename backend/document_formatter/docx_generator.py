@@ -34,6 +34,7 @@ except Exception:
     logger.warning("Pillow (PIL) not available. Image validation will be disabled.")
 
 
+ #function to clean up mermaid diagram label characters
 def _sanitize_mermaid_labels(diagram: str) -> str:
     if not diagram:
         return diagram
@@ -53,7 +54,7 @@ except Exception:
     CAIROS_AVAILABLE = False
     logger.warning("cairosvg not available. SVG->PNG conversion will be disabled.")
 
-
+#function to normalize SVG bytes by trimming leading garbage
 def _normalize_svg_bytes(svg_bytes: bytes) -> bytes:
     if not svg_bytes:
         return svg_bytes
@@ -67,7 +68,7 @@ def _normalize_svg_bytes(svg_bytes: bytes) -> bytes:
         pass
     return b
 
-
+#function to convert SVG bytes to PNG using cairosvg if available
 def _svg_to_png(svg_bytes: bytes) -> Optional[bytes]:
     if not CAIROS_AVAILABLE:
         return None
@@ -83,16 +84,19 @@ def _svg_to_png(svg_bytes: bytes) -> Optional[bytes]:
         return None
 
 
+#function to check if bytes start with a PNG header
 def _is_png_bytes(data: bytes) -> bool:
     return bool(data) and data.startswith(b"\x89PNG\r\n\x1a\n")
 
 
+#function to remove all content from a docx paragraph
 def clear_paragraph(paragraph):
     p = paragraph._p
     for child in list(p):
         p.remove(child)
 
 
+#function to setup default styles for DOCX document
 def setup_styles(doc):
     normal = doc.styles["Normal"]
     normal.font.name = "Calibri"
@@ -108,7 +112,7 @@ def setup_styles(doc):
             h.font.name = "Calibri"
             h.paragraph_format.space_before = Pt(12 if level <= 2 else 8)
             h.paragraph_format.space_after = Pt(6)
-            h.paragraph_format.keep_with_next = True  # Avoids headings dangling at bottom
+            h.paragraph_format.keep_with_next = True
         except KeyError:
             logger.warning(f"Heading {level} style not found, skipping")
     
@@ -123,6 +127,7 @@ def setup_styles(doc):
         logger.warning("List Bullet style not found, will use default")
 
 
+#function to configure page margins, numbering and footer formatting
 def setup_page_formatting(doc, start_page_number: int = 1):
     section = doc.sections[0]
     section.top_margin = Inches(1)
@@ -149,6 +154,7 @@ def setup_page_formatting(doc, start_page_number: int = 1):
     run._r.append(fld)
 
 
+#function to add a modern front page (logo, title, date, company)
 def add_modern_front_page(doc, title: str, project_root: Optional[Path] = None):
     if project_root is None:
         project_root = Path(__file__).parent.parent.parent
@@ -227,7 +233,7 @@ def add_modern_front_page(doc, title: str, project_root: Optional[Path] = None):
     p_pr = title_para._element.get_or_add_pPr()
     try:
         wrap = OxmlElement('w:wordWrap')
-        wrap.set(qn('w:val'), '0')  # 0 = wrap text
+        wrap.set(qn('w:val'), '0')
         p_pr.append(wrap)
         
         overflow = OxmlElement('w:overflowPunct')
@@ -260,7 +266,7 @@ def add_modern_front_page(doc, title: str, project_root: Optional[Path] = None):
     date_run = date_para.add_run(datetime.now().strftime("%B %d, %Y"))
     date_run.font.name = "Calibri"
     date_run.font.size = Pt(14)
-    date_run.font.color.rgb = RGBColor(100, 100, 100)  # Gray
+    date_run.font.color.rgb = RGBColor(100, 100, 100)
     
     for _ in range(4):
         doc.add_paragraph()
@@ -283,6 +289,7 @@ def add_modern_front_page(doc, title: str, project_root: Optional[Path] = None):
     doc.add_paragraph()
 
 
+#function to insert a manual table of contents into the DOCX
 def add_manual_toc(doc, toc_entries: List[Dict[str, Any]]):
     if not toc_entries:
         para = doc.add_paragraph("No table of contents entries available.")
@@ -293,7 +300,7 @@ def add_manual_toc(doc, toc_entries: List[Dict[str, Any]]):
         para.style = 'Normal'
         
         pf = para.paragraph_format
-        indent_level = (entry.get('level', 1) - 1) * 0.5  # 0.5 inches per level
+        indent_level = (entry.get('level', 1) - 1) * 0.5
         if indent_level > 0:
             pf.left_indent = Inches(indent_level)
         
@@ -303,13 +310,13 @@ def add_manual_toc(doc, toc_entries: List[Dict[str, Any]]):
         run.font.name = "Calibri"
         run.font.size = Pt(11)
 
-
+#function to style a table header cell (bold text + background)
 def set_table_header_cell(cell):
     for p in cell.paragraphs:
         for r in p.runs:
             r.bold = True
             try:
-                r.font.color.rgb = RGBColor(255, 255, 255)  # White text
+                r.font.color.rgb = RGBColor(255, 255, 255)
             except:
                 pass
     try:
@@ -322,6 +329,7 @@ def set_table_header_cell(cell):
         logger.warning("Failed to set table header color: %s", e)
 
 
+#function to finalize table formatting for all cells and rows
 def finalize_table(table):
     try:
         table.autofit = True
@@ -346,7 +354,7 @@ def finalize_table(table):
             except Exception as e:
                 logger.debug("Failed to set table cell formatting: %s", e)
 
-
+#function to add text with simple bold formatting markers to a paragraph
 def _add_formatted_text_to_paragraph(para, text: str):
     if not text:
         return
@@ -375,7 +383,7 @@ def _add_formatted_text_to_paragraph(para, text: str):
             if fmt_type == 'bold':
                 run.bold = True
 
-
+#function to add a bulleted paragraph with formatted runs
 def _add_bullet_paragraph(doc, content: str):
     para = doc.add_paragraph()
     
@@ -404,7 +412,7 @@ def _add_bullet_paragraph(doc, content: str):
         parts = [('normal', content)]
     
     for fmt_type, part_content in parts:
-        if part_content:  # Only add non-empty content
+        if part_content:
             run = para.add_run(part_content)
             run.font.name = "Calibri"
             run.font.size = Pt(11)
@@ -413,7 +421,7 @@ def _add_bullet_paragraph(doc, content: str):
     
     return para
 
-
+#function to start a new table with a styled header row
 def _start_table(doc, header_cells: List[str]):
     num_cols = len(header_cells)
     current_table = doc.add_table(rows=1, cols=num_cols)
@@ -434,6 +442,7 @@ def _start_table(doc, header_cells: List[str]):
     return current_table
 
 
+#function to extract heading lines from markdown text
 def _extract_headings_from_markdown(text: str) -> List[Dict[str, Any]]:
     headings = []
     lines = text.split('\n')
@@ -452,6 +461,7 @@ def _extract_headings_from_markdown(text: str) -> List[Dict[str, Any]]:
     return headings
 
 
+#function to parse markdown content and insert formatted elements into DOCX
 def _parse_markdown_to_docx(doc, text: str):
     if not text:
         return
@@ -806,7 +816,7 @@ def _parse_markdown_to_docx(doc, text: str):
         para.style.font.size = Pt(10)
         para.text = '\n'.join(code_block_lines)
 
-
+#function to strip markdown formatting from text
 def _clean_markdown_text(text: str) -> str:
     if not text:
         return text
@@ -820,7 +830,7 @@ def _clean_markdown_text(text: str) -> str:
     text = text.strip()
     return text
 
-
+#function to capitalize the first letter of a sentence if needed
 def _capitalize_sentence(text: str) -> str:
     if not text:
         return text
@@ -829,7 +839,7 @@ def _capitalize_sentence(text: str) -> str:
         return text[0].upper() + text[1:]
     return text
 
-
+#function to convert a single markdown line into appropriate DOCX elements
 def _add_text_line(doc, line: str):
     stripped = line.strip()
     if not stripped:
@@ -862,7 +872,7 @@ def _add_text_line(doc, line: str):
             para = doc.add_paragraph()
             _add_formatted_text_to_paragraph(para, content)
 
-
+#function to generate a DOCX file from responses and return bytes
 def generate_rfp_docx(
     individual_responses: List[Dict[str, Any]],
     requirements_result: RequirementsResult,
@@ -880,7 +890,7 @@ def generate_rfp_docx(
     
     if is_structured:
         if (requirements_result.structure_detection and 
-            requirements_result.structure_detection.detected_sections):            # Use detected sections from structure detection
+            requirements_result.structure_detection.detected_sections):
             toc_entries = [
                 {'text': f"{idx + 1}. {section}", 'level': 1}
                 for idx, section in enumerate(requirements_result.structure_detection.detected_sections)
@@ -920,7 +930,7 @@ def generate_rfp_docx(
     add_modern_front_page(doc, final_title, project_root)
     
     section = doc.add_section(WD_SECTION_START.NEW_PAGE)
-    section.is_linked_to_previous = False  # Break link to previous section's header/footer
+    section.is_linked_to_previous = False
     section.header.is_linked_to_previous = False
     section.footer.is_linked_to_previous = False
     sect_pr = section._sectPr
@@ -930,12 +940,12 @@ def generate_rfp_docx(
         p.getparent().remove(p)
     
     doc.add_heading("Table of Contents", 1)
-    doc.add_paragraph()  # Add spacing after heading
+    doc.add_paragraph()
     
     add_manual_toc(doc, toc_entries)
     
     section = doc.add_section(WD_SECTION_START.NEW_PAGE)
-    section.is_linked_to_previous = False  # Break link to previous section's header/footer
+    section.is_linked_to_previous = False
     section.header.is_linked_to_previous = False
     section.footer.is_linked_to_previous = False
     
@@ -944,8 +954,8 @@ def generate_rfp_docx(
     if existing_pg_num is not None:
         sect_pr.remove(existing_pg_num)
     pg_num_type = OxmlElement('w:pgNumType')
-    pg_num_type.set(qn('w:start'), '1')  # Start numbering at 1
-    pg_num_type.set(qn('w:fmt'), 'decimal')  # Use decimal numbering (1, 2, 3...)
+    pg_num_type.set(qn('w:start'), '1')
+    pg_num_type.set(qn('w:fmt'), 'decimal')
     sect_pr.append(pg_num_type)
     
     section.top_margin = Inches(1)

@@ -17,7 +17,7 @@ load_dotenv()
 _HF_CLIENT = None
 _AZURE_CLIENT = None
 
-
+#function to get or create a hugging face client
 def get_hf_client() -> OpenAI:
     api_key = os.environ.get("HF_TOKEN")
     if not api_key:
@@ -32,6 +32,7 @@ def get_hf_client() -> OpenAI:
         )
     return _HF_CLIENT
 
+#function to get or create an azure openai client
 def get_azure_client() -> AzureOpenAI:
     api_key = os.environ.get("AZURE_OPENAI_API_KEY")
     endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
@@ -52,6 +53,7 @@ def get_azure_client() -> AzureOpenAI:
         )
     return _AZURE_CLIENT
 
+#function to call chat completion on either hf or azure openai with retries
 def chat_completion(
     model: str,
     messages: List[Dict[str, Any]],
@@ -106,6 +108,7 @@ def chat_completion(
         raise last_error
     raise RuntimeError(f"LLM model={model} failed after {max_retries + 1} attempts")
 
+#function to call chat completion on vision models
 def chat_completion_with_vision(
     model: str,
     messages: List[Dict[str, Any]],

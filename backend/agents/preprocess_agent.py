@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 @functools.lru_cache(maxsize=256)
+#function to run the preprocess agent with an LRU cache
 def _run_preprocess_agent_cached(document_text: str) -> PreprocessResult:
     logger.info(
         "Preprocess agent: starting (input_chars=%d)",
@@ -50,6 +51,7 @@ def _run_preprocess_agent_cached(document_text: str) -> PreprocessResult:
         max_tokens=max_output_tokens,
     )
 
+    #function to safely parse JSON returned by the LLM
     def _parse_json_safely(raw: str) -> Dict[str, Any]:
         cleaned = (
             raw.replace("```json", "")
@@ -100,7 +102,7 @@ def _run_preprocess_agent_cached(document_text: str) -> PreprocessResult:
     )
     return result
 
-
+#function to run the preprocess agent and log cache status
 def run_preprocess_agent(document_text: str) -> PreprocessResult:
     cache_info = _run_preprocess_agent_cached.cache_info()
     logger.info(

@@ -14,6 +14,7 @@ QUALITY_MODEL = "gpt-5-chat"
 
 
 @functools.lru_cache(maxsize=256)
+#function to call LLM and parse JSON quality assessment (cached)
 def _assess_response_quality_cached(
     requirement_json: str,
     response_text: str,
@@ -103,7 +104,7 @@ Output JSON format."""
             "suggestions": [],
         }
 
-
+#function to assess response quality using a cached LLM call wrapper
 def assess_response_quality(
     requirement: RequirementItem,
     response_text: str,

@@ -40,6 +40,7 @@ def _run_requirements_agent_cached(essential_text: str) -> RequirementsResult:
     logger.debug("Requirements agent: Raw LLM response (first 500 chars): %s", content[:500])
     logger.debug("Requirements agent: Raw LLM response (last 500 chars): %s", content[-500:] if len(content) > 500 else content)
 
+    #function to safely parse potentially malformed JSON from LLM output
     def _parse_json_safely(raw: str) -> dict:
         cleaned = (
             raw.replace("```json", "")
@@ -193,6 +194,7 @@ def _run_requirements_agent_cached(essential_text: str) -> RequirementsResult:
     )
     return result
 
+#function to extract structured requirements from raw RFP text (cached wrapper)
 def run_requirements_agent(
     essential_text: str,
 ) -> RequirementsResult:
