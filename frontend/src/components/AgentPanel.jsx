@@ -686,6 +686,7 @@ export default function AgentPanel({ agentId }) {
         <DocumentViewer 
           docxBlob={pipelineData.response.blob}
           onSave={handleSaveDocx}
+          requirements={pipelineData.requirements}
         />
       ) : (
         <OutputDisplay content={content} />

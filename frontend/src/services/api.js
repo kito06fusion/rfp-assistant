@@ -368,6 +368,23 @@ export async function saveDocx(docxBase64 = null, htmlContent = null, filename =
   return await response.json();
 }
 
+export async function storeEditMemory(editData) {
+  const response = await fetch(`${API_BASE}/store-edit-memory`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(editData),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Store edit memory error ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  return await response.json();
+}
+
 // =============================================================================
 // ITERATIVE QUESTION FLOW
 // =============================================================================
