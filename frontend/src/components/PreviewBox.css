@@ -16,5 +16,6 @@
 .preview-section { border: 1px dashed var(--border-subtle); padding: 0.6rem; border-radius: 0.5rem; background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.008)); }
 .preview-section pre { max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin:0; color: var(--text-primary); }
 .preview-actions { display:flex; gap:0.5rem }
-.preview-toggle { cursor: pointer; color: var(--accent); background: transparent; border: none; font-size: 0.9rem }
+.preview-toggle { cursor: pointer; color: var(--text-secondary); background: transparent; border: none; font-size: 0.9rem; transition: color var(--transition-fast); }
+.preview-toggle:hover { color: var(--text-primary); }
 .preview-small { font-size: 0.85rem; color: var(--text-muted) }

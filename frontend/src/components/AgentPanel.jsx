@@ -174,6 +174,10 @@ export default function AgentPanel({ agentId }) {
     }
 
     try {
+      // Clear chat session to return to empty state
+      setChatSessionId(null)
+      setAllQuestionsAnswered(false)
+      
       updateStatus('build-query', 'processing')
       const buildQueryData = await buildQuery(pipelineData.preprocess, pipelineData.requirements)
       updatePipelineData('buildQuery', buildQueryData)
@@ -587,13 +591,6 @@ export default function AgentPanel({ agentId }) {
 
   return (
     <div className="agent-panel">
-      <div className="agent-header">
-        <h2>{config.title}</h2>
-        {config.showStatus && config.pillLabel && (
-          <StatusPill status={status} label={config.pillLabel} />
-        )}
-      </div>
-      
       {config.description && (
         <div className="agent-summary">
           <strong>Description:</strong> {config.description}
@@ -614,9 +611,6 @@ export default function AgentPanel({ agentId }) {
       {/* OCR editable view */}
       {agentId === 'ocr' && pipelineData.ocr ? (
         <div className="editable-section">
-          <label className="edit-label">
-            Edit OCR text before running preprocess agent:
-          </label>
           <textarea
             className="edit-textarea"
             value={ocrDraft}
@@ -639,9 +633,6 @@ export default function AgentPanel({ agentId }) {
         </div>
       ) : agentId === 'preprocess' && editable.preprocess && pipelineData.preprocess ? (
         <div className="editable-section">
-          <label className="edit-label">
-            Edit preprocess JSON before running requirements:
-          </label>
           <textarea
             className="edit-textarea"
             value={preprocessDraft}
@@ -659,9 +650,6 @@ export default function AgentPanel({ agentId }) {
         </div>
       ) : agentId === 'requirements' && editable.requirements && pipelineData.requirements ? (
         <div className="editable-section">
-          <label className="edit-label">
-            Edit requirements JSON before building query:
-          </label>
           <textarea
             className="edit-textarea"
             value={requirementsDraft}
@@ -679,9 +667,6 @@ export default function AgentPanel({ agentId }) {
         </div>
       ) : agentId === 'build-query' && editable.buildQuery && pipelineData.buildQuery ? (
         <div className="editable-section">
-          <label className="edit-label">
-            Edit build query before confirming:
-          </label>
           <textarea
             className="edit-textarea"
             value={buildQueryDraft}

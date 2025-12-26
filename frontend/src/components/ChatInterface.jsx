@@ -350,12 +350,6 @@ export default function ChatInterface({
   if (isLoadingSession) {
     return (
       <div className="chat-interface">
-        <div className="chat-header">
-          <h3>Interactive Q&A</h3>
-          {onClose && (
-            <button className="chat-close-btn" onClick={onClose}>×</button>
-          )}
-        </div>
         <div className="chat-loading">
           <p>Loading questions...</p>
         </div>
@@ -367,12 +361,6 @@ export default function ChatInterface({
   if ((iterativeMode && allDone && answeredCount === 0) || (!iterativeMode && totalQuestions === 0)) {
     return (
       <div className="chat-interface">
-        <div className="chat-header">
-          <h3>Interactive Q&A</h3>
-          {onClose && (
-            <button className="chat-close-btn" onClick={onClose}>×</button>
-          )}
-        </div>
         <div className="chat-empty">
           <p>✓ No questions needed!</p>
           <p style={{fontSize: '0.85rem', color: '#9ca3af', marginTop: '0.5rem'}}>
@@ -385,26 +373,21 @@ export default function ChatInterface({
 
   return (
     <div className="chat-interface">
-      <div className="chat-header">
-        <div>
-          {iterativeMode ? (
-            <p className="chat-progress-text">
-              {allDone 
-                ? `✓ All questions answered (${answeredCount})`
-                : `Question ${answeredCount + 1}${remainingGaps > 0 ? ` • ~${remainingGaps} more` : ''}`
-              }
-            </p>
-          ) : (
-            <p className="chat-progress-text">
-              {answeredCount >= totalQuestions || !activeQuestion
-                ? `All ${totalQuestions} questions answered`
-                : `Question ${answeredCount + 1} of ${totalQuestions}`
-              }
-            </p>
-          )}
-        </div>
-        {onClose && (
-          <button className="chat-close-btn" onClick={onClose}>×</button>
+      <div className="chat-progress-bar">
+        {iterativeMode ? (
+          <p className="chat-progress-text">
+            {allDone 
+              ? `✓ All questions answered (${answeredCount})`
+              : `Question ${answeredCount + 1}${remainingGaps > 0 ? ` • ~${remainingGaps} more` : ''}`
+            }
+          </p>
+        ) : (
+          <p className="chat-progress-text">
+            {answeredCount >= totalQuestions || !activeQuestion
+              ? `All ${totalQuestions} questions answered`
+              : `Question ${answeredCount + 1} of ${totalQuestions}`
+            }
+          </p>
         )}
       </div>
       
@@ -469,7 +452,7 @@ export default function ChatInterface({
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyPress}
-                placeholder="Answer in 3-5 sentences... (Ctrl/Cmd + Enter to submit)"
+                placeholder=""
                 rows={4}
                 disabled={isLoading || isProcessingAnswer}
                 autoFocus
@@ -498,7 +481,7 @@ export default function ChatInterface({
         {/* All questions answered */}
         {(allDone || (!activeQuestion && answeredCount > 0)) && (
           <div className="chat-complete">
-            <p>✓ All critical questions answered!</p>
+            <p>✓ All questions answered!</p>
             <p className="chat-complete-subtitle">Ready to generate responses.</p>
           </div>
         )}

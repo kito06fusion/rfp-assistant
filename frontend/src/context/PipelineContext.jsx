@@ -64,6 +64,7 @@ export function PipelineProvider({ children }) {
       requirements: null,
       buildQuery: null,
       response: null,
+      uploadedFileName: null,
     })
     setStatuses({
       ocr: 'waiting',

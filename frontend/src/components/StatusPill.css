@@ -1,26 +1,36 @@
 .pill {
-  font-size: 0.75rem;
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.4);
-  color: #e5e7eb;
-  background: radial-gradient(circle at top left, #0b1220, #020617);
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  background: var(--bg-surface-elevated);
+}
+
+.pill-waiting {
+  border-color: var(--color-dark-blue);
+  color: var(--color-dark-blue);
+  background: var(--accent-soft);
 }
 
 .pill-processing {
-  border-color: #f59e0b;
-  color: #fbbf24;
+  border-color: var(--warning);
+  color: var(--warning);
+  background: rgba(245, 158, 11, 0.1);
   animation: pulse 2s infinite;
 }
 
 .pill-complete {
-  border-color: #16a34a;
-  color: #bbf7d0;
+  border-color: var(--success);
+  color: var(--success);
+  background: rgba(34, 197, 94, 0.1);
 }
 
 .pill-error {
-  border-color: #dc2626;
-  color: #fca5a5;
+  border-color: var(--danger);
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
 }
 
 @keyframes pulse {

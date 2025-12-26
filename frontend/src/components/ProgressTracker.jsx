@@ -3,11 +3,11 @@ import { usePipeline } from '../context/PipelineContext'
 import './ProgressTracker.css'
 
 const PIPELINE_STEPS = [
-  { id: 'ocr', label: 'OCR', order: 1 },
-  { id: 'preprocess', label: 'Preprocess', order: 2 },
-  { id: 'requirements', label: 'Requirements', order: 3 },
-  { id: 'build-query', label: 'Build Query', order: 4 },
-  { id: 'response', label: 'Response', order: 5 },
+  { id: 'ocr', label: 'Extract Text', description: 'OCR', order: 1 },
+  { id: 'preprocess', label: 'Preprocess', description: 'Preprocess', order: 2 },
+  { id: 'requirements', label: 'Identify Requirements', description: 'Requirements', order: 3 },
+  { id: 'build-query', label: 'Build Query', description: 'Build Query', order: 4 },
+  { id: 'response', label: 'Generate Response', description: 'Response', order: 5 },
 ]
 
 export default function ProgressTracker() {
@@ -81,61 +81,84 @@ export default function ProgressTracker() {
 
   const progress = calculateProgress()
   const currentStep = getCurrentStep()
+  const currentStepIndex = currentStep ? PIPELINE_STEPS.findIndex(s => s.id === currentStep.id) : -1
+  const totalSteps = PIPELINE_STEPS.length
+
+  const getStatusText = () => {
+    if (statuses['response'] === 'error' || getStepStatus('response') === 'error') {
+      return 'Error generating response'
+    }
+    if (statuses['response'] === 'processing' || getStepStatus('response') === 'processing') {
+      return 'Generating response'
+    }
+    if (getStepStatus('response') === 'complete') {
+      return 'Response generated'
+    }
+    if (currentStep && getStepStatus(currentStep.id) === 'processing') {
+      return currentStep.label
+    }
+    if (progress === 0) {
+      return 'Waiting for upload'
+    }
+    return ''
+  }
 
   return (
-    <div className="progress-tracker">
+    <div className="progress-tracker" role="region" aria-label="Pipeline progress">
       <div className="progress-header">
         <h3>Pipeline Progress</h3>
-        <div className="progress-percentage">{progress}%</div>
+        <div className="progress-percentage-wrapper">
+          <span className="progress-percentage">{progress}%</span>
+          {progress === 0 && <span className="progress-context">• Waiting for upload</span>}
+        </div>
       </div>
       
-      <div className="progress-bar-container">
+      <div className="progress-bar-container" role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100" aria-label="Overall progress">
         <div 
           className="progress-bar-fill" 
           style={{ width: `${progress}%` }}
         />
       </div>
       
-      <div className="progress-steps">
+      <div className="progress-steps" role="list">
         {PIPELINE_STEPS.map((step, index) => {
           const stepStatus = getStepStatus(step.id)
           const isActive = currentStep?.id === step.id
+          const isComplete = stepStatus === 'complete'
           
           return (
             <div 
               key={step.id} 
               className={`progress-step progress-step-${stepStatus} ${isActive ? 'active' : ''}`}
+              role="listitem"
+              aria-label={`Step ${step.order}: ${step.label} - ${stepStatus === 'complete' ? 'Complete' : stepStatus === 'processing' ? 'Processing' : stepStatus === 'error' ? 'Error' : 'Waiting'}`}
             >
-              <div className="step-indicator">
-                {stepStatus === 'complete' && <span className="step-check">✓</span>}
+              <div className="step-indicator" aria-hidden="true">
+                {isComplete && <span className="step-check">✓</span>}
                 {stepStatus === 'processing' && <span className="step-spinner"></span>}
                 {stepStatus === 'error' && <span className="step-error">✗</span>}
                 {stepStatus === 'blocked' && <span className="step-blocked">⊘</span>}
-                {(stepStatus === 'waiting' && !isActive) && <span className="step-number">{step.order}</span>}
-                {isActive && stepStatus === 'waiting' && <span className="step-number">{step.order}</span>}
+                {stepStatus === 'waiting' && <span className="step-number">{step.order}</span>}
               </div>
-              <div className="step-label">{step.label}</div>
+              <div className="step-content">
+                <div className="step-label">{step.label}</div>
+                {isActive && stepStatus === 'processing' && (
+                  <div className="step-description">Processing...</div>
+                )}
+                {isActive && stepStatus === 'waiting' && (
+                  <div className="step-description">Ready to start</div>
+                )}
+              </div>
             </div>
           )
         })}
       </div>
       
-      <div className="progress-status">
-        {/**
-         * Show error first (so an explicit error doesn't get masked by a
-         * lingering 'processing' flag). Then show response-specific
-         * messages, then fall back to the current step processing message.
-         */}
-        {statuses['response'] === 'error' || getStepStatus('response') === 'error'
-          ? 'Error generating response'
-          : statuses['response'] === 'processing' || getStepStatus('response') === 'processing'
-          ? 'Generating response...'
-          : getStepStatus('response') === 'complete'
-          ? 'Response generated'
-          : currentStep && getStepStatus(currentStep.id) === 'processing'
-          ? `Processing ${currentStep.label}...`
-          : ''}
-      </div>
+      {getStatusText() && (
+        <div className="progress-status" role="status" aria-live="polite">
+          {getStatusText()}
+        </div>
+      )}
     </div>
   )
 }

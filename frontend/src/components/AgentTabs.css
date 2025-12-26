@@ -1,44 +1,125 @@
-.tabs {
-  display: flex;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.95);
-  margin-bottom: 1rem;
-  overflow-x: auto;
+.tabs-container {
   position: relative;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
 }
 
-.tabs::after {
+.tabs-container::before,
+.tabs-container::after {
   content: "";
   position: absolute;
-  inset-inline: 0;
-  bottom: -1px;
-  height: 1px;
-  background: linear-gradient(90deg, rgba(37, 99, 235, 0.4), transparent 40%, rgba(56, 189, 248, 0.3), transparent 70%);
-  opacity: 0.7;
+  top: 0;
+  bottom: 0;
+  width: 40px;
+  pointer-events: none;
+  z-index: 1;
+  transition: opacity 0.3s ease;
+}
+
+.tabs-container::before {
+  left: 0;
+  background: linear-gradient(to right, var(--bg-surface), transparent);
+}
+
+.tabs-container::after {
+  right: 0;
+  background: linear-gradient(to left, var(--bg-surface), transparent);
+}
+
+.tabs {
+  display: flex;
+  margin: 0;
+  padding: 0 2rem;
+  overflow-x: auto;
+  position: relative;
+  gap: 0;
+  scrollbar-width: thin;
+  scroll-behavior: smooth;
+}
+
+.tabs::-webkit-scrollbar {
+  height: 4px;
+}
+
+.tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tabs::-webkit-scrollbar-thumb {
+  background: var(--color-dark-blue);
+  border-radius: 2px;
+  opacity: 0.6;
+}
+
+.tabs::-webkit-scrollbar-thumb:hover {
+  opacity: 0.8;
 }
 
 .tab-button {
-  padding: 0.65rem 1.15rem;
+  padding: 1rem 1.5rem;
   font-size: 0.9rem;
+  font-weight: 500;
   border: none;
-  border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast), transform 120ms ease-out;
+  transition: all var(--transition-med);
   white-space: nowrap;
   position: relative;
+  letter-spacing: 0.01em;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.tab-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: opacity var(--transition-med);
+}
+
+.tab-label {
+  flex-shrink: 0;
+}
+
+.tab-button:focus {
+  outline: 2px solid var(--color-dark-blue);
+  outline-offset: -2px;
 }
 
 .tab-button.active {
-  color: var(--text-primary);
-  border-bottom-color: #2563eb;
-  background: radial-gradient(circle at 50% 120%, rgba(37, 99, 235, 0.18), transparent 60%);
-  transform: translateY(-1px);
+  color: var(--color-dark-blue);
+  background: var(--accent-soft);
+}
+
+.tab-button.active .tab-icon {
+  opacity: 1;
+  color: var(--color-dark-blue);
+}
+
+.tab-button.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--color-dark-blue);
+  box-shadow: 0 0 8px rgba(30, 58, 95, 0.5);
 }
 
 .tab-button:not(.active):hover {
-  background: rgba(15, 23, 42, 0.9);
-  color: #e5e7eb;
+  color: var(--color-dark-blue);
+  background: var(--accent-soft);
+}
+
+.tab-button:not(.active):hover .tab-icon {
+  opacity: 1;
+  color: var(--color-dark-blue);
 }
 
 .tab-panel {
@@ -52,6 +133,17 @@
 
 .columns {
   display: block;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.agents-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 @keyframes fadeInTab {
