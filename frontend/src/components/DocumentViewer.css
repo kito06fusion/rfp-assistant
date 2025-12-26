@@ -17,6 +17,8 @@
   padding: 1.5rem;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-surface-elevated);
+  flex-wrap: wrap;
+  gap: 1rem;
 }
 
 .document-viewer-header h2 {
@@ -30,6 +32,65 @@
   display: flex;
   gap: 0.75rem;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.filename-input-group {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  flex-direction: column;
+}
+
+.filename-label {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.filename-input-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 200px;
+}
+
+.filename-input {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.75rem;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  width: 100%;
+  transition: border-color var(--transition-med), box-shadow var(--transition-med);
+}
+
+.filename-input:focus {
+  outline: none;
+  border-color: var(--color-dark-blue);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.filename-input.filename-input-error {
+  border-color: var(--danger);
+}
+
+.filename-input.filename-input-error:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+}
+
+.filename-input::placeholder {
+  color: var(--text-muted);
+}
+
+.filename-error-message {
+  font-size: 0.75rem;
+  color: var(--danger);
+  margin-top: 0.25rem;
+  line-height: 1.4;
 }
 
 .close-btn {

@@ -399,9 +399,9 @@ export default function AgentPanel({ agentId }) {
   }
 
   // Handle saving DOCX (supports both original blob and edited HTML)
-  const handleSaveDocx = async (docxBase64, htmlContent) => {
+  const handleSaveDocx = async (docxBase64, htmlContent, filename = null) => {
     try {
-      const result = await saveDocx(docxBase64, htmlContent)
+      const result = await saveDocx(docxBase64, htmlContent, filename)
       setSummary(`Document saved successfully to: ${result.path}`)
       alert(`Document saved successfully to:\n${result.path}`)
     } catch (err) {
