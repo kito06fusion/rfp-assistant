@@ -54,34 +54,121 @@ except Exception:
     CAIROS_AVAILABLE = False
     logger.warning("cairosvg not available. SVG->PNG conversion will be disabled.")
 
-#function to normalize SVG bytes by trimming leading garbage
-def _normalize_svg_bytes(svg_bytes: bytes) -> bytes:
+#function to validate SVG bytes structure
+def _validate_svg_bytes(svg_bytes: bytes) -> bool:
     if not svg_bytes:
-        return svg_bytes
-    b = svg_bytes.lstrip()
+        return False
     try:
-        low = b.lower()
-        idx = low.find(b"<svg")
-        if idx > 0:
-            b = b[idx:]
+        svg_str = svg_bytes.decode('utf-8', errors='ignore').strip()
+        return '<svg' in svg_str.lower() or svg_str.startswith('<?xml')
     except Exception:
-        pass
-    return b
+        return False
 
-#function to convert SVG bytes to PNG using cairosvg if available
-def _svg_to_png(svg_bytes: bytes) -> Optional[bytes]:
-    if not CAIROS_AVAILABLE:
+
+#function to normalize SVG bytes by trimming leading garbage and fixing encoding
+def _normalize_svg_bytes(svg_bytes: bytes) -> Optional[bytes]:
+    if not svg_bytes:
         return None
+    
     try:
-        svg_bytes = _normalize_svg_bytes(svg_bytes)
-        png = cairosvg.svg2png(bytestring=svg_bytes)
-        if png and png.startswith(b"\x89PNG\r\n\x1a\n"):
-            return png
-        logger.warning("SVG->PNG conversion did not produce PNG header (len=%d)", len(png) if png else 0)
-        return None
+        try:
+            svg_str = svg_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            try:
+                svg_str = svg_bytes.decode('latin-1')
+            except Exception:
+                logger.warning("SVG bytes could not be decoded as UTF-8 or latin-1")
+                return None
+        
+        svg_str = svg_str.lstrip()
+        svg_lower = svg_str.lower()
+        
+        svg_start_idx = svg_lower.find('<svg')
+        if svg_start_idx < 0:
+            xml_start_idx = svg_lower.find('<?xml')
+            if xml_start_idx >= 0:
+                svg_start_idx = xml_start_idx
+            else:
+                logger.warning("SVG content does not contain <svg> or <?xml> tag")
+                return None
+        
+        if svg_start_idx > 0:
+            svg_str = svg_str[svg_start_idx:]
+            logger.debug("Trimmed %d bytes of leading garbage from SVG", svg_start_idx)
+        
+        if not svg_str.strip().startswith('<?xml') and svg_str.strip().startswith('<svg'):
+            svg_str = '<?xml version="1.0" encoding="UTF-8"?>\n' + svg_str
+        
+        return svg_str.encode('utf-8')
+        
     except Exception as e:
-        logger.exception("SVG->PNG conversion failed: %s", e)
+        logger.warning("Failed to normalize SVG bytes: %s", e)
         return None
+
+
+#function to convert SVG bytes to PNG using cairosvg with retries and better error handling
+def _svg_to_png(svg_bytes: bytes, max_retries: int = 2) -> Optional[bytes]:
+    if not CAIROS_AVAILABLE:
+        logger.debug("cairosvg not available, cannot convert SVG to PNG")
+        return None
+    
+    if not svg_bytes:
+        logger.warning("Empty SVG bytes provided for conversion")
+        return None
+    
+    if not _validate_svg_bytes(svg_bytes):
+        logger.warning("SVG bytes do not appear to contain valid SVG content")
+        return None
+    
+    normalized_svg = _normalize_svg_bytes(svg_bytes)
+    if not normalized_svg:
+        logger.warning("Failed to normalize SVG bytes for conversion")
+        return None
+    
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            if attempt > 0:
+                logger.info("Retrying SVG->PNG conversion (attempt %d/%d)", attempt + 1, max_retries + 1)
+                import time
+                time.sleep(0.1 * attempt)
+            
+            png = cairosvg.svg2png(bytestring=normalized_svg)
+            
+            if not png:
+                logger.warning("cairosvg returned empty PNG bytes")
+                continue
+            
+            if not png.startswith(b"\x89PNG\r\n\x1a\n"):
+                logger.warning(
+                    "SVG->PNG conversion did not produce valid PNG header (got %d bytes, first 8: %s)",
+                    len(png),
+                    png[:8] if len(png) >= 8 else "too short"
+                )
+                continue
+            
+            if len(png) < 100:
+                logger.warning("PNG output is suspiciously small (%d bytes), may be invalid", len(png))
+                continue
+            
+            logger.debug("Successfully converted SVG to PNG (%d bytes)", len(png))
+            return png
+            
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries:
+                logger.warning(
+                    "SVG->PNG conversion failed on attempt %d/%d: %s (will retry)",
+                    attempt + 1,
+                    max_retries + 1,
+                    str(e)
+                )
+            else:
+                logger.exception("SVG->PNG conversion failed after %d attempts: %s", max_retries + 1, e)
+    
+    if last_error:
+        logger.error("SVG->PNG conversion failed after all retries. Last error: %s", last_error)
+    return None
 
 
 #function to check if bytes start with a PNG header
@@ -323,8 +410,8 @@ def set_table_header_cell(cell):
             r.bold = True
             try:
                 r.font.color.rgb = RGBColor(255, 255, 255)
-            except:
-                pass
+            except Exception as color_err:
+                logger.debug("Failed to set font color for table header: %s", color_err)
     try:
         tc_pr = cell._element.get_or_add_tcPr()
         shading = OxmlElement('w:shd')
@@ -339,8 +426,8 @@ def set_table_header_cell(cell):
 def finalize_table(table):
     try:
         table.autofit = True
-    except:
-        pass
+    except Exception as autofit_err:
+        logger.debug("Failed to set table autofit: %s", autofit_err)
     
     for row in table.rows:
         for cell in row.cells:
@@ -431,13 +518,20 @@ def _add_bullet_paragraph(doc, content: str):
 def _start_table(doc, header_cells: List[str]):
     num_cols = len(header_cells)
     current_table = doc.add_table(rows=1, cols=num_cols)
-    try:
-        current_table.style = 'Light Grid Accent 1'
-    except:
+    table_styles = ['Light Grid Accent 1', 'Grid Table 1 Light', 'Table Grid']
+    style_applied = False
+    for style_name in table_styles:
         try:
-            current_table.style = 'Grid Table 1 Light'
-        except:
-            pass
+            current_table.style = style_name
+            style_applied = True
+            logger.debug("Applied table style: %s", style_name)
+            break
+        except Exception as e:
+            logger.debug("Failed to apply table style '%s': %s", style_name, e)
+            continue
+    
+    if not style_applied:
+        logger.debug("No table style could be applied, using default")
     
     try:
         header_row = current_table.rows[0]
@@ -532,22 +626,23 @@ def _parse_markdown_to_docx(doc, text: str):
             png_bytes = None
             if rendered:
                 if CAIROS_AVAILABLE:
-                    try:
-                        png_bytes = _svg_to_png(rendered)
-                        if png_bytes is None:
-                            logger.warning('Failed to convert SVG->PNG via cairosvg (normalized path returned None)')
-                    except Exception as e:
-                        logger.warning('Failed to convert SVG->PNG via cairosvg: %s', e)
-                        png_bytes = None
+                    png_bytes = _svg_to_png(rendered)
+                    if png_bytes is None:
+                        logger.debug('SVG->PNG conversion returned None (will fall back to Kroki if needed)')
                 else:
-                    logger.warning('cairosvg not available; cannot convert SVG to PNG; falling back to Kroki')
+                    logger.debug('cairosvg not available; cannot convert SVG to PNG')
 
                 if png_bytes and PIL_AVAILABLE:
                     try:
                         im = Image.open(BytesIO(png_bytes))
                         im.verify()
-                    except Exception:
-                        logger.warning('Converted PNG bytes are not a valid image according to PIL; falling back to Kroki')
+                        im.load()
+                        logger.debug('PIL validated converted PNG successfully (%d bytes)', len(png_bytes))
+                    except Exception as pil_err:
+                        logger.warning(
+                            'Converted PNG bytes failed PIL validation: %s (will fall back to Kroki)',
+                            str(pil_err)
+                        )
                         png_bytes = None
 
             img_to_insert = png_bytes if png_bytes else None
