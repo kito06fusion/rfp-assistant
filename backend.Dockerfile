@@ -13,12 +13,7 @@ RUN apt-get update && \
         libpangoft2-1.0-0 \
         libfontconfig1 \
         libcairo2 \
-        libcairo2-dev \
-        libpango1.0-dev \
         libgdk-pixbuf-2.0-0 \
-        libgdk-pixbuf-xlib-2.0-dev \
-        libffi-dev \
-        pkg-config \
         shared-mime-info \
         libgobject-2.0-0 \
         ca-certificates \
@@ -26,20 +21,12 @@ RUN apt-get update && \
         gnupg \
         build-essential \
         wget \
-        libx11-xcb1 \
-        libxcomposite1 \
-        libxdamage1 \
-        libxrandr2 \
-        libgbm1 \
-        libasound2 \
         fonts-liberation && \
     rm -rf /var/lib/apt/lists/*
 
-# (Removed) Headless Chromium installation — no longer required; Mermaid
-# rendering is performed via an external MCP service (OpenAI Responses API).
-
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
 
 COPY backend backend
 COPY docs ./docs

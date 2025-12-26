@@ -53,11 +53,41 @@ CRITICAL RULES:
 RESPONSE_SYSTEM_PROMPT += """
 
 DIAGRAM GUIDELINES:
-- If a diagram would clearly improve clarity or conciseness (for example: process flows, component interactions, timelines, or sequences), include exactly ONE Mermaid diagram in the response.
+- If a diagram would clearly improve clarity or conciseness, include exactly ONE Mermaid diagram in the response.
+- Choose the appropriate diagram type based on the content:
+  * **flowchart** or **graph**: Process flows, workflows, decision trees, system architecture, component relationships
+  * **sequenceDiagram**: Interactions between systems/components over time, API calls, message flows
+  * **gantt**: Project timelines, implementation schedules, milestones, phases
+  * **classDiagram**: System architecture, object relationships, data models, class structures
+  * **stateDiagram**: State machines, workflow states, status transitions
+  * **pie**: Data distributions, resource allocation, percentage breakdowns
 - The diagram must be provided as a fenced code block with the language `mermaid`, e.g.:
 ````mermaid
-graph LR
-  A --> B
+flowchart TD
+  A[Start] --> B{Decision}
+  B -->|Yes| C[Action 1]
+  B -->|No| D[Action 2]
+````
+or
+````mermaid
+sequenceDiagram
+  participant Client
+  participant API
+  participant Database
+  Client->>API: Request
+  API->>Database: Query
+  Database-->>API: Results
+  API-->>Client: Response
+````
+or
+````mermaid
+gantt
+  title Implementation Timeline
+  section Phase 1
+  Design: 2024-01-01, 30d
+  section Phase 2
+  Development: 2024-02-01, 60d
+  Testing: 2024-04-01, 30d
 ````
 - Place the diagram after the textual answer and include one short caption line immediately after the fenced block (plain text, one sentence). Example:
 Caption: High-level request flow from client to database.
@@ -84,11 +114,41 @@ CRITICAL RULES:
 STRUCTURED_RESPONSE_SYSTEM_PROMPT += """
 
 DIAGRAM GUIDELINES:
-- If a diagram would clearly improve clarity for a section (process flows, architecture, timelines, sequences), you may include exactly ONE Mermaid diagram in the overall generated document.
+- If a diagram would clearly improve clarity for a section, you may include exactly ONE Mermaid diagram in the overall generated document.
+- Choose the appropriate diagram type based on the content:
+  * **flowchart** or **graph**: Process flows, workflows, decision trees, system architecture, component relationships
+  * **sequenceDiagram**: Interactions between systems/components over time, API calls, message flows
+  * **gantt**: Project timelines, implementation schedules, milestones, phases
+  * **classDiagram**: System architecture, object relationships, data models, class structures
+  * **stateDiagram**: State machines, workflow states, status transitions
+  * **pie**: Data distributions, resource allocation, percentage breakdowns
 - Provide the diagram as a fenced code block with language `mermaid`, for example:
 ````mermaid
-flowchart LR
-  A --> B
+flowchart TD
+  A[Start] --> B{Decision}
+  B -->|Yes| C[Action 1]
+  B -->|No| D[Action 2]
+````
+or
+````mermaid
+sequenceDiagram
+  participant Client
+  participant API
+  participant Database
+  Client->>API: Request
+  API->>Database: Query
+  Database-->>API: Results
+  API-->>Client: Response
+````
+or
+````mermaid
+gantt
+  title Implementation Timeline
+  section Phase 1
+  Design: 2024-01-01, 30d
+  section Phase 2
+  Development: 2024-02-01, 60d
+  Testing: 2024-04-01, 30d
 ````
 - Place the diagram where it best fits (for multi-section documents, include it in the most relevant section), and add one short caption line immediately after the fenced block. Example:
 Caption: High-level request flow from client to database.

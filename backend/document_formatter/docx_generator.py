@@ -5,7 +5,6 @@ import re
 import httpx
 import os
 import tempfile
-from backend.mermaid_renderer import render_mermaid_to_bytes
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -38,137 +37,36 @@ except Exception:
 def _sanitize_mermaid_labels(diagram: str) -> str:
     if not diagram:
         return diagram
-    return (
-        diagram.replace('“', '"')
-        .replace('”', '"')
-        .replace('‘', "'")
-        .replace('’', "'")
-        .strip()
+    
+    diagram = (
+        diagram.replace('"', '"')
+        .replace('"', '"')
+        .replace(''', "'")
+        .replace(''', "'")
     )
-
-
-try:
-    import cairosvg
-    CAIROS_AVAILABLE = True
-except Exception:
-    CAIROS_AVAILABLE = False
-    logger.warning("cairosvg not available. SVG->PNG conversion will be disabled.")
-
-#function to validate SVG bytes structure
-def _validate_svg_bytes(svg_bytes: bytes) -> bool:
-    if not svg_bytes:
-        return False
-    try:
-        svg_str = svg_bytes.decode('utf-8', errors='ignore').strip()
-        return '<svg' in svg_str.lower() or svg_str.startswith('<?xml')
-    except Exception:
-        return False
-
-
-#function to normalize SVG bytes by trimming leading garbage and fixing encoding
-def _normalize_svg_bytes(svg_bytes: bytes) -> Optional[bytes]:
-    if not svg_bytes:
-        return None
     
-    try:
-        try:
-            svg_str = svg_bytes.decode('utf-8')
-        except UnicodeDecodeError:
-            try:
-                svg_str = svg_bytes.decode('latin-1')
-            except Exception:
-                logger.warning("SVG bytes could not be decoded as UTF-8 or latin-1")
-                return None
-        
-        svg_str = svg_str.lstrip()
-        svg_lower = svg_str.lower()
-        
-        svg_start_idx = svg_lower.find('<svg')
-        if svg_start_idx < 0:
-            xml_start_idx = svg_lower.find('<?xml')
-            if xml_start_idx >= 0:
-                svg_start_idx = xml_start_idx
-            else:
-                logger.warning("SVG content does not contain <svg> or <?xml> tag")
-                return None
-        
-        if svg_start_idx > 0:
-            svg_str = svg_str[svg_start_idx:]
-            logger.debug("Trimmed %d bytes of leading garbage from SVG", svg_start_idx)
-        
-        if not svg_str.strip().startswith('<?xml') and svg_str.strip().startswith('<svg'):
-            svg_str = '<?xml version="1.0" encoding="UTF-8"?>\n' + svg_str
-        
-        return svg_str.encode('utf-8')
-        
-    except Exception as e:
-        logger.warning("Failed to normalize SVG bytes: %s", e)
-        return None
-
-
-#function to convert SVG bytes to PNG using cairosvg with retries and better error handling
-def _svg_to_png(svg_bytes: bytes, max_retries: int = 2) -> Optional[bytes]:
-    if not CAIROS_AVAILABLE:
-        logger.debug("cairosvg not available, cannot convert SVG to PNG")
-        return None
+    lines = diagram.split('\n')
+    fixed_lines = []
     
-    if not svg_bytes:
-        logger.warning("Empty SVG bytes provided for conversion")
-        return None
+    for line in lines:
+        def fix_label(match):
+            label_content = match.group(1)
+            # If it already has quotes, leave it alone
+            if (label_content.startswith('"') and label_content.endswith('"')) or \
+               (label_content.startswith("'") and label_content.endswith("'")):
+                return match.group(0)
+            # If it contains parentheses, wrap in quotes
+            if '(' in label_content or ')' in label_content:
+                # Escape any existing quotes in the label
+                escaped = label_content.replace('"', '\\"')
+                return f'["{escaped}"]'
+            return match.group(0)
+        
+        # Match [label] patterns
+        line = re.sub(r'\[([^\]]+)\]', fix_label, line)
+        fixed_lines.append(line)
     
-    if not _validate_svg_bytes(svg_bytes):
-        logger.warning("SVG bytes do not appear to contain valid SVG content")
-        return None
-    
-    normalized_svg = _normalize_svg_bytes(svg_bytes)
-    if not normalized_svg:
-        logger.warning("Failed to normalize SVG bytes for conversion")
-        return None
-    
-    last_error = None
-    for attempt in range(max_retries + 1):
-        try:
-            if attempt > 0:
-                logger.info("Retrying SVG->PNG conversion (attempt %d/%d)", attempt + 1, max_retries + 1)
-                import time
-                time.sleep(0.1 * attempt)
-            
-            png = cairosvg.svg2png(bytestring=normalized_svg)
-            
-            if not png:
-                logger.warning("cairosvg returned empty PNG bytes")
-                continue
-            
-            if not png.startswith(b"\x89PNG\r\n\x1a\n"):
-                logger.warning(
-                    "SVG->PNG conversion did not produce valid PNG header (got %d bytes, first 8: %s)",
-                    len(png),
-                    png[:8] if len(png) >= 8 else "too short"
-                )
-                continue
-            
-            if len(png) < 100:
-                logger.warning("PNG output is suspiciously small (%d bytes), may be invalid", len(png))
-                continue
-            
-            logger.debug("Successfully converted SVG to PNG (%d bytes)", len(png))
-            return png
-            
-        except Exception as e:
-            last_error = e
-            if attempt < max_retries:
-                logger.warning(
-                    "SVG->PNG conversion failed on attempt %d/%d: %s (will retry)",
-                    attempt + 1,
-                    max_retries + 1,
-                    str(e)
-                )
-            else:
-                logger.exception("SVG->PNG conversion failed after %d attempts: %s", max_retries + 1, e)
-    
-    if last_error:
-        logger.error("SVG->PNG conversion failed after all retries. Last error: %s", last_error)
-    return None
+    return '\n'.join(fixed_lines).strip()
 
 
 #function to check if bytes start with a PNG header
@@ -592,12 +490,26 @@ def _parse_markdown_to_docx(doc, text: str):
     code_block_lang = None
     last_was_blank = False
     list_item_buffer = []
+    diagram_count = 0
     
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
         mermaid_start_pattern = re.compile(r'^(?:flowchart|graph|sequenceDiagram|classDiagram|gantt|stateDiagram|pie|erDiagram)\b', re.IGNORECASE)
         if mermaid_start_pattern.match(stripped):
+            if diagram_count >= 1:
+                logger.info('Skipping additional mermaid diagram (only 1 diagram per document allowed)')
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j]
+                    next_stripped = next_line.strip()
+                    if not next_stripped or next_stripped.startswith('```') or next_stripped.startswith('#'):
+                        break
+                    j += 1
+                i = j
+                continue
+            
+            diagram_count += 1
             block_lines = [line.rstrip('\n')]
             j = i + 1
             caption_text = None
@@ -618,88 +530,136 @@ def _parse_markdown_to_docx(doc, text: str):
             block_text = '\n'.join(block_lines)
             sanitized_block = _sanitize_mermaid_labels(block_text)
 
-            rendered = None
-            try:
-                rendered = render_mermaid_to_bytes(sanitized_block, fmt='svg')
-            except Exception as e:
-                logger.exception('MCP mermaid rendering failed: %s', e)
             png_bytes = None
-            if rendered:
-                if CAIROS_AVAILABLE:
-                    png_bytes = _svg_to_png(rendered)
-                    if png_bytes is None:
-                        logger.debug('SVG->PNG conversion returned None (will fall back to Kroki if needed)')
+            
+            try:
+                logger.debug('Attempting Kroki PNG rendering for diagram')
+                kroki_url = 'https://kroki.io/mermaid/png'
+                resp = httpx.post(kroki_url, content=sanitized_block.encode('utf-8'), headers={"Content-Type": "text/plain"}, timeout=30.0)
+                if resp.status_code == 200:
+                    kroki_png = resp.content
+                    if kroki_png and _is_png_bytes(kroki_png):
+                        png_bytes = kroki_png
+                        logger.info('Kroki PNG rendering succeeded (%d bytes)', len(png_bytes))
+                    else:
+                        logger.warning('Kroki returned invalid PNG (status 200 but no PNG header, %d bytes)', len(kroki_png) if kroki_png else 0)
                 else:
-                    logger.debug('cairosvg not available; cannot convert SVG to PNG')
-
-                if png_bytes and PIL_AVAILABLE:
-                    try:
-                        im = Image.open(BytesIO(png_bytes))
-                        im.verify()
-                        im.load()
-                        logger.debug('PIL validated converted PNG successfully (%d bytes)', len(png_bytes))
-                    except Exception as pil_err:
-                        logger.warning(
-                            'Converted PNG bytes failed PIL validation: %s (will fall back to Kroki)',
-                            str(pil_err)
-                        )
-                        png_bytes = None
+                    logger.warning('Kroki returned status %s for mermaid render', resp.status_code)
+                    if resp.status_code == 400:
+                        error_msg = resp.text[:500] if hasattr(resp, 'text') and resp.text else 'Unknown error'
+                        logger.error('Kroki syntax error - diagram code preview: %s', sanitized_block[:200])
+                        logger.error('Kroki error details: %s', error_msg)
+            except Exception as e:
+                logger.exception('Kroki PNG rendering failed: %s', e)
 
             img_to_insert = png_bytes if png_bytes else None
 
             if img_to_insert:
                 try:
                     logger.info('Inserting locally rendered mermaid image into DOCX (unfenced)')
-                    img_stream = BytesIO(img_to_insert)
-                    img_stream.seek(0)
+                    
+                    validated_bytes = img_to_insert
+                    if PIL_AVAILABLE and isinstance(img_to_insert, bytes) and len(img_to_insert) > 0:
+                        try:
+                            img_stream_for_validation = BytesIO(img_to_insert)
+                            img_stream_for_validation.seek(0)
+                            im = Image.open(img_stream_for_validation)
+                            im.verify()
+                            img_stream_for_save = BytesIO(img_to_insert)
+                            img_stream_for_save.seek(0)
+                            im = Image.open(img_stream_for_save)
+                            reencoded_stream = BytesIO()
+                            im.save(reencoded_stream, format='PNG')
+                            reencoded_bytes = reencoded_stream.getvalue()
+                            if reencoded_bytes and len(reencoded_bytes) > 0:
+                                validated_bytes = reencoded_bytes
+                                logger.debug('PNG validated and re-encoded successfully (%d bytes)', len(validated_bytes))
+                            else:
+                                logger.warning('PNG re-encoding produced empty result, will use original bytes')
+                        except Exception as pil_err:
+                            logger.warning('PNG validation/re-encoding failed: %s, will use original bytes', str(pil_err))
+                    
+                    inserted = False
                     try:
+                        img_stream = BytesIO(validated_bytes)
+                        img_stream.seek(0)
                         doc.add_picture(img_stream, width=Inches(5))
-                    except Exception:
-                        logger.exception('doc.add_picture from BytesIO failed; trying temp file fallback')
+                        inserted = True
+                        logger.debug('Successfully inserted PNG from BytesIO')
+                    except Exception as stream_err:
+                        logger.debug('doc.add_picture from BytesIO failed: %s, trying temp file fallback', str(stream_err))
+                    
+                    if not inserted:
                         tmpname = None
                         try:
                             with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tf:
-                                tf.write(img_to_insert)
+                                tf.write(validated_bytes)
+                                tf.flush()
                                 tmpname = tf.name
                             doc.add_picture(tmpname, width=Inches(5))
+                            inserted = True
+                            logger.debug('Successfully inserted PNG from temp file')
+                        except Exception as file_err:
+                            logger.warning('Failed to insert PNG from temp file: %s', str(file_err))
                         finally:
                             if tmpname:
                                 try:
                                     os.remove(tmpname)
                                 except Exception:
                                     pass
-
-                    if caption_text:
+                    
+                    if inserted and caption_text:
                         cap_para = doc.add_paragraph()
                         cap_run = cap_para.add_run(caption_text)
                         cap_run.italic = True
                         cap_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    elif not inserted:
+                        logger.warning('Failed to insert PNG image, will fall back to Kroki')
+                        img_to_insert = None
                 except Exception as e:
                     logger.exception('Failed to insert locally rendered mermaid image into docx (unfenced): %s', e)
-                    rendered = None
+                    img_to_insert = None
 
-            if not rendered:
+            if not img_to_insert:
                 try:
                     kroki_url = 'https://kroki.io/mermaid/png'
+                    logger.debug('Attempting Kroki fallback for mermaid diagram (length=%d chars)', len(sanitized_block))
                     resp = httpx.post(kroki_url, content=sanitized_block.encode('utf-8'), headers={"Content-Type": "text/plain"}, timeout=30.0)
                     if resp.status_code == 200:
                         img_bytes = resp.content
-                        try:
-                            img_stream = BytesIO(img_bytes)
-                            doc.add_picture(img_stream, width=Inches(5))
-                            if caption_text:
-                                cap_para = doc.add_paragraph()
-                                cap_run = cap_para.add_run(caption_text)
-                                cap_run.italic = True
-                                cap_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        except Exception as e:
-                            logger.warning('Failed to insert Kroki mermaid image into docx (unfenced): %s', e)
+                        if img_bytes and len(img_bytes) > 0:
+                            if img_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+                                try:
+                                    img_stream = BytesIO(img_bytes)
+                                    doc.add_picture(img_stream, width=Inches(5))
+                                    if caption_text:
+                                        cap_para = doc.add_paragraph()
+                                        cap_run = cap_para.add_run(caption_text)
+                                        cap_run.italic = True
+                                        cap_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                    logger.info('Successfully inserted Kroki-rendered mermaid diagram')
+                                except Exception as e:
+                                    logger.warning('Failed to insert Kroki mermaid image into docx (unfenced): %s', e)
+                                    para = doc.add_paragraph(style='Normal')
+                                    para.style.font.name = 'Consolas'
+                                    para.style.font.size = Pt(10)
+                                    para.text = block_text
+                            else:
+                                logger.warning('Kroki returned invalid PNG (no PNG header, %d bytes)', len(img_bytes))
+                                para = doc.add_paragraph(style='Normal')
+                                para.style.font.name = 'Consolas'
+                                para.style.font.size = Pt(10)
+                                para.text = block_text
+                        else:
+                            logger.warning('Kroki returned empty response')
                             para = doc.add_paragraph(style='Normal')
                             para.style.font.name = 'Consolas'
                             para.style.font.size = Pt(10)
                             para.text = block_text
                     else:
-                        logger.warning('Kroki returned status %s for mermaid render (unfenced)', resp.status_code)
+                        error_text = resp.text[:500] if hasattr(resp, 'text') else 'no error text'
+                        logger.warning('Kroki returned status %s for mermaid render (unfenced): %s', resp.status_code, error_text)
+                        logger.debug('Diagram that failed: %s', sanitized_block[:200])
                         para = doc.add_paragraph(style='Normal')
                         para.style.font.name = 'Consolas'
                         para.style.font.size = Pt(10)
@@ -726,90 +686,115 @@ def _parse_markdown_to_docx(doc, text: str):
                         block_text = re.sub(r"\n?\s*Caption:\s*.+\s*$", "", block_text, flags=re.IGNORECASE)
 
                     if code_block_lang == 'mermaid':
-                        rendered = None
-                        sanitized_block = _sanitize_mermaid_labels(block_text)
-                        try:
-                            rendered = render_mermaid_to_bytes(sanitized_block, fmt='png')
-                        except Exception as e:
-                            logger.exception('MCP mermaid rendering failed: %s', e)
-
-                        if rendered:
+                        if diagram_count >= 1:
+                            logger.info('Skipping additional mermaid diagram in fenced block (only 1 diagram per document allowed)')
+                            para = doc.add_paragraph(style='Normal')
+                            para.style.font.name = 'Consolas'
+                            para.style.font.size = Pt(10)
+                            para.text = block_text
+                        else:
+                            diagram_count += 1
+                            rendered = None
+                            sanitized_block = _sanitize_mermaid_labels(block_text)
                             try:
-                                logger.info('Inserting locally rendered mermaid image into DOCX')
-                                if PIL_AVAILABLE:
-                                    try:
-                                        im = Image.open(BytesIO(rendered))
-                                        im.verify()
-                                    except Exception:
-                                        logger.warning('Rendered mermaid bytes are not a valid image according to PIL; falling back to Kroki')
-                                        rendered = None
-                                else:
-                                    if not _is_png_bytes(rendered):
-                                        logger.warning('Rendered mermaid bytes do not have a PNG header; falling back to Kroki')
-                                        rendered = None
-
-                                if rendered:
-                                    img_stream = BytesIO(rendered)
-                                    img_stream.seek(0)
-                                    try:
-                                        doc.add_picture(img_stream, width=Inches(5))
-                                    except Exception:
-                                        logger.exception('doc.add_picture from BytesIO failed; trying temp file fallback')
-                                        tmpname = None
-                                        try:
-                                            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tf:
-                                                tf.write(rendered)
-                                                tmpname = tf.name
-                                            doc.add_picture(tmpname, width=Inches(5))
-                                        finally:
-                                            if tmpname:
-                                                try:
-                                                    os.remove(tmpname)
-                                                except Exception:
-                                                    pass
-
-                                if caption_text:
-                                    cap_para = doc.add_paragraph()
-                                    cap_run = cap_para.add_run(caption_text)
-                                    cap_run.italic = True
-                                    cap_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            except Exception as e:
-                                logger.exception('Failed to insert locally rendered mermaid image into docx: %s', e)
-                                rendered = None
-
-                        if not rendered:
-                            try:
+                                logger.debug('Attempting Kroki PNG rendering for fenced diagram')
                                 kroki_url = 'https://kroki.io/mermaid/png'
                                 resp = httpx.post(kroki_url, content=sanitized_block.encode('utf-8'), headers={"Content-Type": "text/plain"}, timeout=30.0)
                                 if resp.status_code == 200:
-                                    logger.info('Kroki returned image bytes for mermaid block')
-                                    img_bytes = resp.content
-                                    try:
-                                        img_stream = BytesIO(img_bytes)
-                                        doc.add_picture(img_stream, width=Inches(5))
-                                        if caption_text:
-                                            cap_para = doc.add_paragraph()
-                                            cap_run = cap_para.add_run(caption_text)
-                                            cap_run.italic = True
-                                            cap_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                    except Exception as e:
-                                        logger.warning('Failed to insert Kroki mermaid image into docx: %s', e)
+                                    rendered = resp.content
+                                    if rendered and _is_png_bytes(rendered):
+                                        logger.info('Kroki PNG rendering succeeded for fenced diagram (%d bytes)', len(rendered))
+                                    else:
+                                        logger.warning('Kroki returned invalid PNG for fenced diagram')
+                                        rendered = None
+                                else:
+                                    logger.warning('Kroki returned status %s for fenced mermaid render', resp.status_code)
+                                    if resp.status_code == 400:
+                                        error_msg = resp.text[:500] if hasattr(resp, 'text') and resp.text else 'Unknown error'
+                                        logger.error('Kroki syntax error - fenced diagram code preview: %s', sanitized_block[:200])
+                                        logger.error('Kroki error details: %s', error_msg)
+                                    rendered = None
+                            except Exception as e:
+                                logger.exception('Kroki PNG rendering failed for fenced diagram: %s', e)
+                                rendered = None
+
+                            if rendered:
+                                try:
+                                    logger.info('Inserting locally rendered mermaid image into DOCX')
+                                    if PIL_AVAILABLE:
+                                        try:
+                                            im = Image.open(BytesIO(rendered))
+                                            im.verify()
+                                        except Exception:
+                                            logger.warning('Rendered mermaid bytes are not a valid image according to PIL; falling back to Kroki')
+                                            rendered = None
+                                    else:
+                                        if not _is_png_bytes(rendered):
+                                            logger.warning('Rendered mermaid bytes do not have a PNG header; falling back to Kroki')
+                                            rendered = None
+
+                                    if rendered:
+                                        img_stream = BytesIO(rendered)
+                                        img_stream.seek(0)
+                                        try:
+                                            doc.add_picture(img_stream, width=Inches(5))
+                                        except Exception:
+                                            logger.exception('doc.add_picture from BytesIO failed; trying temp file fallback')
+                                            tmpname = None
+                                            try:
+                                                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tf:
+                                                    tf.write(rendered)
+                                                    tmpname = tf.name
+                                                doc.add_picture(tmpname, width=Inches(5))
+                                            finally:
+                                                if tmpname:
+                                                    try:
+                                                        os.remove(tmpname)
+                                                    except Exception:
+                                                        pass
+
+                                    if caption_text:
+                                        cap_para = doc.add_paragraph()
+                                        cap_run = cap_para.add_run(caption_text)
+                                        cap_run.italic = True
+                                        cap_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                except Exception as e:
+                                    logger.exception('Failed to insert locally rendered mermaid image into docx: %s', e)
+                                    rendered = None
+
+                            if not rendered:
+                                try:
+                                    kroki_url = 'https://kroki.io/mermaid/png'
+                                    resp = httpx.post(kroki_url, content=sanitized_block.encode('utf-8'), headers={"Content-Type": "text/plain"}, timeout=30.0)
+                                    if resp.status_code == 200:
+                                        logger.info('Kroki returned image bytes for mermaid block')
+                                        img_bytes = resp.content
+                                        try:
+                                            img_stream = BytesIO(img_bytes)
+                                            doc.add_picture(img_stream, width=Inches(5))
+                                            if caption_text:
+                                                cap_para = doc.add_paragraph()
+                                                cap_run = cap_para.add_run(caption_text)
+                                                cap_run.italic = True
+                                                cap_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                        except Exception as e:
+                                            logger.warning('Failed to insert Kroki mermaid image into docx: %s', e)
+                                            para = doc.add_paragraph(style='Normal')
+                                            para.style.font.name = 'Consolas'
+                                            para.style.font.size = Pt(10)
+                                            para.text = block_text
+                                    else:
+                                        logger.warning('Kroki returned status %s for mermaid render', resp.status_code)
                                         para = doc.add_paragraph(style='Normal')
                                         para.style.font.name = 'Consolas'
                                         para.style.font.size = Pt(10)
                                         para.text = block_text
-                                else:
-                                    logger.warning('Kroki returned status %s for mermaid render', resp.status_code)
+                                except Exception as e:
+                                    logger.exception('Failed to call Kroki for mermaid rendering: %s', e)
                                     para = doc.add_paragraph(style='Normal')
                                     para.style.font.name = 'Consolas'
                                     para.style.font.size = Pt(10)
                                     para.text = block_text
-                            except Exception as e:
-                                logger.exception('Failed to call Kroki for mermaid rendering: %s', e)
-                                para = doc.add_paragraph(style='Normal')
-                                para.style.font.name = 'Consolas'
-                                para.style.font.size = Pt(10)
-                                para.text = block_text
                     else:
                         para = doc.add_paragraph(style='Normal')
                         para.style.font.name = 'Consolas'

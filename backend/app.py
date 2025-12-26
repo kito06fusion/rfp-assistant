@@ -16,7 +16,6 @@ import httpx
 import re
 import asyncio
 
-from backend.mermaid_renderer import render_mermaid_to_bytes
 
 from backend.pipeline.text_extraction import extract_text_from_file
 from backend.agents.preprocess_agent import run_preprocess_agent
@@ -445,23 +444,10 @@ async def render_mermaid(req: RenderRequest):
     except Exception:
         logger.debug('Failed to produce diagram preview for logs')
     
-    try:
-        loop = asyncio.get_running_loop()
-        logger.info('Attempting MCP mermaid rendering for diagram (fmt=%s)', fmt)
-        data = await loop.run_in_executor(None, lambda: render_mermaid_to_bytes(diagram_text, fmt))
-        media_type = 'image/png' if fmt == 'png' else 'image/svg+xml'
-        logger.info('MCP mermaid rendering succeeded; returning image bytes')
-        headers = {"X-Diagram-Renderer": "mcp-mermaid"}
-        if caption:
-            headers["X-Diagram-Caption"] = caption
-        return Response(content=data, media_type=media_type, headers=headers)
-    except Exception as e:
-        logger.exception('MCP mermaid rendering failed: %s', e)
-
     kroki_url = f'https://kroki.io/mermaid/{fmt}'
 
     try:
-        logger.info('Requesting Kroki rendering as fallback (fmt=%s)', fmt)
+        logger.info('Requesting Kroki rendering (fmt=%s)', fmt)
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(kroki_url, content=diagram_text.encode('utf-8'), headers={"Content-Type": "text/plain"})
     except Exception as e:
