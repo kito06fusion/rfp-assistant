@@ -168,11 +168,9 @@ def validate_before_generation(
             errors.append(f"Solution requirement {idx} missing ID")
         if not req.source_text or not req.source_text.strip():
             errors.append(f"Solution requirement {idx} ({req.id}) missing source_text")
-        if not req.source_text or not req.source_text.strip():
-            errors.append(f"Solution requirement {idx} ({req.id}) missing source_text")
         if not req.category or not req.category.strip():
             errors.append(f"Solution requirement {idx} ({req.id}) missing category")
-        if len(req.source_text) < 10:
+        if req.source_text and len(req.source_text) < 10:
             errors.append(f"Solution requirement {idx} ({req.id}) source_text too short (likely incomplete)")
     
     if not requirements_result.response_structure_requirements:
@@ -181,8 +179,6 @@ def validate_before_generation(
         for idx, req in enumerate(requirements_result.response_structure_requirements, 1):
             if not req.id or not req.id.strip():
                 errors.append(f"Response structure requirement {idx} missing ID")
-            if not req.source_text or not req.source_text.strip():
-                errors.append(f"Response structure requirement {idx} ({req.id}) missing source_text")
             if not req.source_text or not req.source_text.strip():
                 errors.append(f"Response structure requirement {idx} ({req.id}) missing source_text")
     
@@ -582,6 +578,208 @@ def _extraction_from_preprocess(pre: PreprocessResult) -> ExtractionResult:
     )
 
 
+#function to build combined text response from individual responses (for logging)
+def _build_combined_response_text(
+    individual_responses: List[Dict[str, Any]],
+    requirements_result: RequirementsResult,
+) -> str:
+    combined_parts = []
+    combined_parts.append("=" * 80)
+    combined_parts.append("RFP RESPONSE DOCUMENT")
+    combined_parts.append("=" * 80)
+    combined_parts.append("")
+    
+    if requirements_result.response_structure_requirements:
+        combined_parts.append("RESPONSE STRUCTURE REQUIREMENTS")
+        combined_parts.append("-" * 80)
+        for resp_req in requirements_result.response_structure_requirements:
+            combined_parts.append(resp_req.source_text)
+            combined_parts.append("")
+        combined_parts.append("")
+    
+    combined_parts.append("SOLUTION REQUIREMENT RESPONSES")
+    combined_parts.append("=" * 80)
+    combined_parts.append("")
+    
+    for idx, resp_data in enumerate(individual_responses, 1):
+        combined_parts.append(f"Requirement {idx}: {resp_data['requirement_id']}")
+        combined_parts.append("-" * 80)
+        combined_parts.append(f"Requirement: {resp_data['requirement_text']}")
+        combined_parts.append("")
+        combined_parts.append("Response:")
+        combined_parts.append("-" * 40)
+        combined_parts.append(resp_data['response'])
+        combined_parts.append("")
+        combined_parts.append("")
+    
+    return "\n".join(combined_parts)
+
+
+#function to extract key phrase from requirement text
+def _extract_key_phrase(source_text: str, max_words: int = 10) -> str:
+    words = source_text.split()
+    return " ".join(words[:max_words]) + ("..." if len(words) > max_words else "")
+
+
+#function to create an error response dict for a failed requirement
+def _create_error_response(
+    requirement_id: str,
+    requirement_text: str,
+    key_phrase: str,
+    error: Exception,
+) -> Dict[str, Any]:
+    return {
+        "requirement_id": requirement_id,
+        "requirement_text": requirement_text,
+        "key_phrase": key_phrase,
+        "response": f"[ERROR: Failed to generate response for this requirement: {str(error)}]",
+        "notes": f"Error: {str(error)}",
+        "quality": {
+            "score": 0.0,
+            "completeness": "incomplete",
+            "relevance": "low",
+            "issues": [f"Generation failed: {str(error)}"],
+            "suggestions": ["Fix the error and regenerate"],
+        },
+    }
+
+
+#function to log progress for requirement processing
+def _log_requirement_progress(
+    idx: int,
+    total: int,
+    successful: int,
+    failed: int,
+    requirement_id: str,
+) -> None:
+    logger.info(
+        "[%d/%d] Progress: %d successful, %d failed, %d remaining",
+        idx,
+        total,
+        successful,
+        failed,
+        total - idx,
+    )
+
+
+#function to log final generation summary
+def _log_generation_summary(
+    total_requirements: int,
+    successful_responses: int,
+    failed_responses: int,
+    total_elapsed: float,
+    combined_response_length: int,
+) -> None:
+    logger.info("=" * 80)
+    logger.info("Response generation completed:")
+    logger.info("  Total requirements: %d", total_requirements)
+    logger.info("  Successful responses: %d", successful_responses)
+    logger.info("  Failed responses: %d", failed_responses)
+    logger.info(
+        "  Success rate: %.1f%%",
+        (successful_responses / total_requirements * 100) if total_requirements > 0 else 0.0,
+    )
+    logger.info("  Total time: %.2f seconds", total_elapsed)
+    logger.info(
+        "  Average time per requirement: %.2f seconds",
+        total_elapsed / total_requirements if total_requirements > 0 else 0.0,
+    )
+    logger.info("  Combined response length: %d characters", combined_response_length)
+    logger.info("=" * 80)
+
+
+#function to process a single requirement and generate response
+def _process_single_requirement(
+    solution_req: Any,
+    idx: int,
+    total_requirements: int,
+    extraction_result: ExtractionResult,
+    requirements_result: RequirementsResult,
+    knowledge_base: Any,
+    qa_context: str,
+) -> Dict[str, Any]:
+    req_start_time = time.time()
+    key_phrase = _extract_key_phrase(solution_req.source_text)
+    
+    logger.info(
+        "[%d/%d] Processing requirement: %s",
+        idx,
+        total_requirements,
+        solution_req.id,
+    )
+    logger.debug(
+        "[%d/%d] Requirement text: %s",
+        idx,
+        total_requirements,
+        solution_req.source_text[:100] + "..."
+        if len(solution_req.source_text) > 100
+        else solution_req.source_text,
+    )
+    
+    build_query_obj = build_query_for_single_requirement(
+        extraction_result=extraction_result,
+        single_requirement=solution_req,
+        all_response_structure_requirements=requirements_result.response_structure_requirements,
+    )
+    build_query_obj.confirmed = True
+    
+    try:
+        result = run_response_agent(
+            build_query=build_query_obj,
+            knowledge_base=knowledge_base,
+            qa_context=qa_context,
+        )
+        
+        quality_assessment = assess_response_quality(solution_req, result.response_text)
+        req_elapsed = time.time() - req_start_time
+        
+        response_dict = {
+            "requirement_id": solution_req.id,
+            "requirement_text": solution_req.source_text,
+            "key_phrase": key_phrase,
+            "response": result.response_text,
+            "notes": result.notes,
+            "quality": quality_assessment,
+        }
+        
+        logger.info(
+            "[%d/%d] ✓ SUCCESS: Generated response for requirement %s (length=%d chars, time=%.2fs)",
+            idx,
+            total_requirements,
+            solution_req.id,
+            len(result.response_text),
+            req_elapsed,
+        )
+        
+        return {"response": response_dict, "success": True, "elapsed": req_elapsed}
+        
+    except Exception as req_exc:
+        req_elapsed = time.time() - req_start_time
+        logger.error(
+            "[%d/%d] ✗ FAILED: Requirement %s failed after %.2fs: %s",
+            idx,
+            total_requirements,
+            solution_req.id,
+            req_elapsed,
+            req_exc,
+        )
+        logger.exception(
+            "[%d/%d] Full error traceback for requirement %s:",
+            idx,
+            total_requirements,
+            solution_req.id,
+        )
+        
+        error_response = _create_error_response(
+            requirement_id=solution_req.id,
+            requirement_text=solution_req.source_text,
+            key_phrase=key_phrase,
+            error=req_exc,
+        )
+        
+        return {"response": error_response, "success": False, "elapsed": req_elapsed}
+
+
 #function to build a query from preprocess and requirements
 @app.post("/build-query")
 async def build_query_endpoint(req: BuildQueryRequest) -> Dict[str, Any]:
@@ -752,13 +950,14 @@ async def _generate_structured_response(
         total_elapsed = time.time() - start_time
         logger.info("Structured response generated in %.2f seconds (length=%d chars)", total_elapsed, len(result.response_text))
         
-        from backend.document_formatter import generate_rfp_docx
-        if not generate_rfp_docx:
-            logger.error("DOCX generation not available. Install python-docx to enable Word export.")
+        try:
+            from backend.document_formatter import generate_rfp_docx
+        except ImportError as import_err:
+            logger.error("DOCX generation not available: %s", import_err)
             raise HTTPException(
                 status_code=500,
                 detail="DOCX generation not available. Install python-docx to enable Word export.",
-            )
+            ) from import_err
         
         rfp_title = _extract_title_from_key_requirements(extraction_result.key_requirements_summary)
         
@@ -798,9 +997,10 @@ def _generate_docx_response(
     extraction_result: ExtractionResult,
     requirements_result: RequirementsResult,
 ) -> Response:
-    from backend.document_formatter import generate_rfp_docx
-    if not generate_rfp_docx:
-        raise ImportError("DOCX generation not available. Install python-docx.")
+    try:
+        from backend.document_formatter import generate_rfp_docx
+    except ImportError as import_err:
+        raise ImportError("DOCX generation not available. Install python-docx.") from import_err
     
     rfp_title = _extract_title_from_key_requirements(extraction_result.key_requirements_summary)
     
@@ -881,257 +1081,31 @@ async def _generate_per_requirement_response(
     
     try:
         for idx, solution_req in enumerate(requirements_result.solution_requirements, 1):
-            req_start_time = time.time()
-            logger.info(
-                "[%d/%d] Processing requirement: %s",
-                idx,
-                total_requirements,
-                solution_req.id,
-            )
-            logger.debug(
-                "[%d/%d] Requirement text: %s",
-                idx,
-                total_requirements,
-                solution_req.source_text[:100] + "..."
-                if len(solution_req.source_text) > 100
-                else solution_req.source_text,
-            )
-            
-            build_query_obj = build_query_for_single_requirement(
+            result = _process_single_requirement(
+                solution_req=solution_req,
+                idx=idx,
+                total_requirements=total_requirements,
                 extraction_result=extraction_result,
-                single_requirement=solution_req,
-                all_response_structure_requirements=requirements_result.response_structure_requirements,
-            )
-            build_query_obj.confirmed = True
-            
-            try:
-                result = run_response_agent(
-                    build_query=build_query_obj,
-                    knowledge_base=knowledge_base,
-                    qa_context=qa_context,
-                )
-                words = solution_req.source_text.split()
-                key_phrase = " ".join(words[:10]) + ("..." if len(words) > 10 else "")
-                
-                quality_assessment = assess_response_quality(solution_req, result.response_text)
-                
-                individual_responses.append({
-                    "requirement_id": solution_req.id,
-                    "requirement_text": solution_req.source_text,
-                    "key_phrase": key_phrase,
-                    "response": result.response_text,
-                    "notes": result.notes,
-                    "quality": quality_assessment,
-                })
-                req_elapsed = time.time() - req_start_time
-                successful_responses += 1
-                logger.info(
-                    "[%d/%d] ✓ SUCCESS: Generated response for requirement %s (length=%d chars, time=%.2fs)",
-                    idx,
-                    total_requirements,
-                    solution_req.id,
-                    len(result.response_text),
-                    req_elapsed,
-                )
-                logger.info(
-                    "[%d/%d] Progress: %d successful, %d failed, %d remaining",
-                    idx,
-                    total_requirements,
-                    successful_responses,
-                    failed_responses,
-                    total_requirements - idx,
-                )
-            except Exception as req_exc:
-                req_elapsed = time.time() - req_start_time
-                failed_responses += 1
-                logger.error(
-                    "[%d/%d] ✗ FAILED: Requirement %s failed after %.2fs: %s",
-                    idx,
-                    total_requirements,
-                    solution_req.id,
-                    req_elapsed,
-                    req_exc,
-                )
-                logger.exception(
-                    "[%d/%d] Full error traceback for requirement %s:",
-                    idx,
-                    total_requirements,
-                    solution_req.id,
-                )
-                words = solution_req.source_text.split()
-                key_phrase = " ".join(words[:10]) + ("..." if len(words) > 10 else "")
-
-                individual_responses.append({
-                    "requirement_id": solution_req.id,
-                    "requirement_text": solution_req.source_text,
-                    "key_phrase": key_phrase,
-                    "response": f"[ERROR: Failed to generate response for this requirement: {str(req_exc)}]",
-                    "notes": f"Error: {str(req_exc)}",
-                    "quality": {
-                        "score": 0.0,
-                        "completeness": "incomplete",
-                        "relevance": "low",
-                        "issues": [f"Generation failed: {str(req_exc)}"],
-                        "suggestions": ["Fix the error and regenerate"],
-                    },
-                })
-                logger.info(
-                    "[%d/%d] Progress: %d successful, %d failed, %d remaining",
-                    idx,
-                    total_requirements,
-                    successful_responses,
-                    failed_responses,
-                    total_requirements - idx,
-                )
-
-            del req_start_time, req_elapsed
-    except KeyboardInterrupt:
-        logger.warning("Response generation interrupted by user")
-        partial_completion = True
-        raise
-    except Exception as catastrophic_error:
-        logger.error(
-            "Catastrophic error during response generation: %s",
-            catastrophic_error,
-        )
-        logger.exception("Full traceback:")
-        partial_completion = True
-        
-        if not individual_responses:
-            if partial_completion:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Response generation failed before any responses could be generated. Check server logs.",
-                )
-        
-        if partial_completion:
-            logger.warning(
-                "Response generation completed partially: %d/%d requirements processed",
-                len(individual_responses),
-                total_requirements,
-            )
-        
-        combined_parts = []
-        
-        combined_parts.append("=" * 80)
-        combined_parts.append("RFP RESPONSE DOCUMENT")
-        combined_parts.append("=" * 80)
-        combined_parts.append("")
-        
-        if requirements_result.response_structure_requirements:
-            combined_parts.append("RESPONSE STRUCTURE REQUIREMENTS")
-            combined_parts.append("-" * 80)
-            for resp_req in requirements_result.response_structure_requirements:
-                combined_parts.append(resp_req.source_text)
-                combined_parts.append("")
-            combined_parts.append("")
-        
-        combined_parts.append("SOLUTION REQUIREMENT RESPONSES")
-        combined_parts.append("=" * 80)
-        combined_parts.append("")
-        
-        for idx, resp_data in enumerate(individual_responses, 1):
-            combined_parts.append(f"Requirement {idx}: {resp_data['requirement_id']}")
-            combined_parts.append("-" * 80)
-            combined_parts.append(f"Requirement: {resp_data['requirement_text']}")
-            combined_parts.append("")
-            combined_parts.append("Response:")
-            combined_parts.append("-" * 40)
-            combined_parts.append(resp_data['response'])
-            combined_parts.append("")
-            combined_parts.append("")
-        
-        combined_response = "\n".join(combined_parts)
-        total_elapsed = time.time() - start_time
-        
-        logger.info(
-            "=" * 80
-        )
-        logger.info(
-            "Response generation completed:"
-        )
-        logger.info(
-            "  Total requirements: %d",
-            total_requirements,
-        )
-        logger.info(
-            "  Successful responses: %d",
-            successful_responses,
-        )
-        logger.info(
-            "  Failed responses: %d",
-            failed_responses,
-        )
-        logger.info(
-            "  Success rate: %.1f%%",
-            (successful_responses / total_requirements * 100) if total_requirements > 0 else 0.0,
-        )
-        logger.info(
-            "  Total time: %.2f seconds",
-            total_elapsed,
-        )
-        logger.info(
-            "  Average time per requirement: %.2f seconds",
-            total_elapsed / total_requirements if total_requirements > 0 else 0.0,
-        )
-        logger.info(
-            "  Combined response length: %d characters",
-            len(combined_response),
-        )
-        logger.info(
-            "=" * 80
-        )
-        
-        logger.info("Generating DOCX document...")
-        try:
-            from backend.document_formatter import generate_rfp_docx
-            if not generate_rfp_docx:
-                raise ImportError("DOCX generation not available. Install python-docx.")
-            
-            rfp_title = _extract_title_from_key_requirements(extraction_result.key_requirements_summary)
-            
-            logger.info("Generating DOCX with %d individual responses", len(individual_responses))
-            docx_start_time = time.time()
-            
-            #generate DOCX in memory without saving to disk
-            docx_bytes = generate_rfp_docx(
-                individual_responses=individual_responses,
                 requirements_result=requirements_result,
-                extraction_result=extraction_result,
-                rfp_title=rfp_title,
-                output_path=None,
+                knowledge_base=knowledge_base,
+                qa_context=qa_context,
             )
             
-            docx_elapsed = time.time() - docx_start_time
-            timestamp = int(time.time())
-            docx_filename = f"rfp_response_{extraction_result.language}_{timestamp}.docx"
+            individual_responses.append(result["response"])
             
-            logger.info(
-                "DOCX generation completed successfully: %d bytes in %.2f seconds (in memory, not saved)",
-                len(docx_bytes),
-                docx_elapsed,
+            if result["success"]:
+                successful_responses += 1
+            else:
+                failed_responses += 1
+            
+            _log_requirement_progress(
+                idx=idx,
+                total=total_requirements,
+                successful=successful_responses,
+                failed=failed_responses,
+                requirement_id=solution_req.id,
             )
             
-            return Response(
-                content=docx_bytes,
-                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                headers={
-                    "Content-Disposition": f'inline; filename="{docx_filename}"',
-                    "Content-Length": str(len(docx_bytes)),
-                }
-            )
-        except ImportError as import_exc:
-            logger.error("DOCX generation not available: %s", import_exc)
-            raise HTTPException(
-                status_code=500,
-                detail="DOCX generation not available. python-docx dependency is missing. Check server logs.",
-            ) from import_exc
-        except Exception as docx_exc:
-            logger.exception("DOCX generation failed: %s", docx_exc)
-            raise HTTPException(
-                status_code=500,
-                detail=f"DOCX generation failed: {str(docx_exc)}",
-            ) from docx_exc
     except KeyboardInterrupt:
         logger.warning("Response generation interrupted by user")
         partial_completion = True
@@ -1159,48 +1133,15 @@ async def _generate_per_requirement_response(
             total_requirements,
         )
     
-    combined_parts = []
-    combined_parts.append("=" * 80)
-    combined_parts.append("RFP RESPONSE DOCUMENT")
-    combined_parts.append("=" * 80)
-    combined_parts.append("")
-    
-    if requirements_result.response_structure_requirements:
-        combined_parts.append("RESPONSE STRUCTURE REQUIREMENTS")
-        combined_parts.append("-" * 80)
-        for resp_req in requirements_result.response_structure_requirements:
-            combined_parts.append(resp_req.source_text)
-            combined_parts.append("")
-        combined_parts.append("")
-    
-    combined_parts.append("SOLUTION REQUIREMENT RESPONSES")
-    combined_parts.append("=" * 80)
-    combined_parts.append("")
-    
-    for idx, resp_data in enumerate(individual_responses, 1):
-        combined_parts.append(f"Requirement {idx}: {resp_data['requirement_id']}")
-        combined_parts.append("-" * 80)
-        combined_parts.append(f"Requirement: {resp_data['requirement_text']}")
-        combined_parts.append("")
-        combined_parts.append("Response:")
-        combined_parts.append("-" * 40)
-        combined_parts.append(resp_data['response'])
-        combined_parts.append("")
-        combined_parts.append("")
-    
-    combined_response = "\n".join(combined_parts)
     total_elapsed = time.time() - start_time
-    
-    logger.info("=" * 80)
-    logger.info("Response generation completed:")
-    logger.info("  Total requirements: %d", total_requirements)
-    logger.info("  Successful responses: %d", successful_responses)
-    logger.info("  Failed responses: %d", failed_responses)
-    logger.info("  Success rate: %.1f%%", (successful_responses / total_requirements * 100) if total_requirements > 0 else 0.0)
-    logger.info("  Total time: %.2f seconds", total_elapsed)
-    logger.info("  Average time per requirement: %.2f seconds", total_elapsed / total_requirements if total_requirements > 0 else 0.0)
-    logger.info("  Combined response length: %d characters", len(combined_response))
-    logger.info("=" * 80)
+    combined_response_text = _build_combined_response_text(individual_responses, requirements_result)
+    _log_generation_summary(
+        total_requirements=total_requirements,
+        successful_responses=successful_responses,
+        failed_responses=failed_responses,
+        total_elapsed=total_elapsed,
+        combined_response_length=len(combined_response_text),
+    )
     
     logger.info("Generating DOCX document...")
     try:
@@ -1631,7 +1572,7 @@ async def get_session(session_id: str) -> Dict[str, Any]:
     }
 
 
-#function to enrich build query with session context (no-op if none)
+#function to enrich build query with session context
 @app.post("/enrich-build-query")
 async def enrich_build_query_endpoint(req: EnrichBuildQueryRequest) -> Dict[str, Any]:
     try:
@@ -1644,11 +1585,30 @@ async def enrich_build_query_endpoint(req: EnrichBuildQueryRequest) -> Dict[str,
 
     if req.session_id and req.session_id in _conversation_sessions:
         context = _conversation_sessions[req.session_id]
-        logger.info(
-            "Enrich build query called for session %s (answers=%d) – build_query text left unchanged",
-            req.session_id,
-            len(context.answers),
-        )
+        qa_context = context.get_qa_context()
+        if qa_context:
+            original_text = build_query.query_text or ""
+            if original_text and qa_context:
+                enriched_text = f"{original_text}\n\n--- Q&A Context from Session ---\n{qa_context}"
+                build_query.query_text = enriched_text
+                logger.info(
+                    "Enriched build query with Q&A context from session %s (%d answers, added %d chars)",
+                    req.session_id,
+                    len(context.answers),
+                    len(qa_context),
+                )
+            else:
+                logger.info(
+                    "Enrich build query called for session %s (answers=%d) – no Q&A context to add",
+                    req.session_id,
+                    len(context.answers),
+                )
+        else:
+            logger.info(
+                "Enrich build query called for session %s (answers=%d) – Q&A context is empty",
+                req.session_id,
+                len(context.answers),
+            )
     else:
         logger.info("Enrich build query called without valid session_id; returning original build query text")
 
@@ -1703,6 +1663,8 @@ async def preview_responses_endpoint(req: PreviewResponseRequest) -> Dict[str, A
         total_requirements = len(requirements_result.solution_requirements)
         
         for idx, solution_req in enumerate(requirements_result.solution_requirements, 1):
+            key_phrase = _extract_key_phrase(solution_req.source_text)
+            
             try:
                 build_query_obj = build_query_for_single_requirement(
                     extraction_result=extraction_result,
@@ -1717,9 +1679,6 @@ async def preview_responses_endpoint(req: PreviewResponseRequest) -> Dict[str, A
                     qa_context=qa_context,
                 )
                 
-                words = solution_req.source_text.split()
-                key_phrase = " ".join(words[:10]) + ("..." if len(words) > 10 else "")
-                
                 quality_assessment = assess_response_quality(solution_req, result.response_text)
                 
                 individual_responses.append({
@@ -1732,8 +1691,6 @@ async def preview_responses_endpoint(req: PreviewResponseRequest) -> Dict[str, A
                 })
             except Exception as req_exc:
                 logger.error("Failed to generate response for requirement %s: %s", solution_req.id, req_exc)
-                words = solution_req.source_text.split()
-                key_phrase = " ".join(words[:10]) + ("..." if len(words) > 10 else "")
                 individual_responses.append({
                     "requirement_id": solution_req.id,
                     "requirement_text": solution_req.source_text,
@@ -1872,9 +1829,11 @@ async def generate_pdf_from_preview_endpoint(req: GeneratePDFFromPreviewRequest)
     )
 
     if req.format == "docx":
-        from backend.document_formatter import generate_rfp_docx
-        if not generate_rfp_docx:
-            raise HTTPException(status_code=500, detail="DOCX generation not available. Install python-docx.")
+        try:
+            from backend.document_formatter import generate_rfp_docx
+        except ImportError as import_err:
+            logger.error("DOCX generation not available: %s", import_err)
+            raise HTTPException(status_code=500, detail="DOCX generation not available. Install python-docx.") from import_err
         
         output_dir = project_root / "output" / "docx"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -1941,9 +1900,8 @@ async def generate_pdf_from_preview_endpoint(req: GeneratePDFFromPreviewRequest)
         filename = f"rfp_response_{extraction_result.language}_{timestamp}.pdf"
         pdf_path = output_dir / filename
         logger.info(
-            "Generating PDF from preview %s into %s",
+            "Generating PDF from preview %s (in memory)",
             req.preview_id,
-            pdf_path,
         )
 
         pdf_bytes = generate_rfp_pdf(
@@ -1951,10 +1909,14 @@ async def generate_pdf_from_preview_endpoint(req: GeneratePDFFromPreviewRequest)
             requirements_result=requirements_result,
             extraction_result=extraction_result,
             rfp_title=rfp_title,
-            output_path=pdf_path,
+            output_path=None,
         )
         
-        pdf_bytes = pdf_path.read_bytes()
+        try:
+            pdf_path.write_bytes(pdf_bytes)
+            logger.info("PDF also saved to disk: %s", pdf_path.absolute())
+        except Exception as save_err:
+            logger.warning("Failed to save PDF to disk: %s (continuing with in-memory response)", save_err)
         
         return Response(
             content=pdf_bytes,
