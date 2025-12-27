@@ -786,26 +786,29 @@ export default function AgentPanel({ agentId }) {
             </div>
           )}
 
-          {questionsGenerated && allQuestionsAnswered && (
-            <div className="accept-row" style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
-              <Button
-                onClick={() => updateConfirmation('buildQueryConfirmed', !confirmations.buildQueryConfirmed)}
-                className={confirmations.buildQueryConfirmed ? 'accepted' : ''}
-              >
-                {confirmations.buildQueryConfirmed ? '✓ Build query confirmed' : 'Confirm build query'}
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={handleToggleBuildQueryEdit}
-              >
-                {editable.buildQuery ? 'Close editor' : 'Edit build query'}
-              </Button>
-            </div>
-          )}
-          
-          {questionsGenerated && !allQuestionsAnswered && chatSessionId && (
-            <div className="accept-row" style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'rgba(37, 99, 235, 0.1)', border: '1px solid rgba(37, 99, 235, 0.3)', borderRadius: '0.5rem', color: '#60a5fa' }}>
-              Please answer all questions in the chat panel before confirming the build query.
+          {questionsGenerated && (
+            <div className="accept-row" style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <Button
+                  onClick={() => updateConfirmation('buildQueryConfirmed', !confirmations.buildQueryConfirmed)}
+                  className={confirmations.buildQueryConfirmed ? 'accepted' : ''}
+                  disabled={!allQuestionsAnswered}
+                  title={!allQuestionsAnswered ? 'Please answer or skip all questions before confirming' : ''}
+                >
+                  {confirmations.buildQueryConfirmed ? '✓ Build query confirmed' : 'Confirm build query'}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={handleToggleBuildQueryEdit}
+                >
+                  {editable.buildQuery ? 'Close editor' : 'Edit build query'}
+                </Button>
+              </div>
+              {!allQuestionsAnswered && chatSessionId && (
+                <div style={{ padding: '0.75rem', background: 'rgba(37, 99, 235, 0.1)', border: '1px solid rgba(37, 99, 235, 0.3)', borderRadius: '0.5rem', color: '#60a5fa', fontSize: '0.875rem' }}>
+                  Please answer or skip all questions in the chat panel before confirming the build query.
+                </div>
+              )}
             </div>
           )}
         </>
